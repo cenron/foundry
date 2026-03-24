@@ -1,3 +1,14 @@
+// @title           Foundry API
+// @version         0.1.0
+// @description     Spec-driven AI development platform — orchestrates teams of Claude Code agents.
+
+// @host            localhost:8080
+// @BasePath        /api
+// @schemes         http
+
+// @accept          json
+// @produce         json
+
 package main
 
 import (
@@ -14,6 +25,8 @@ import (
 	"github.com/cenron/foundry/internal/cache"
 	"github.com/cenron/foundry/internal/config"
 	"github.com/cenron/foundry/internal/database"
+
+	_ "github.com/cenron/foundry/api/swagger"
 )
 
 func main() {

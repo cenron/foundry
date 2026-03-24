@@ -25,3 +25,6 @@ dist/
 web/build/
 .next/
 *.tsbuildinfo
+
+# Generated
+web/src/api/generated/
