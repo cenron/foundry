@@ -162,7 +162,14 @@ func (m *Manager) GetStatus(ctx context.Context, containerID string) (*Container
 		return nil, fmt.Errorf("inspecting container: %w", err)
 	}
 
-	started, _ := time.Parse(time.RFC3339Nano, info.State.StartedAt)
+	if info.State == nil {
+		return nil, fmt.Errorf("inspecting container: State is nil for %s", containerID)
+	}
+
+	started, err := time.Parse(time.RFC3339Nano, info.State.StartedAt)
+	if err != nil {
+		started = time.Time{}
+	}
 
 	return &ContainerStatus{
 		ID:      info.ID,

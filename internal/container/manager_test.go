@@ -102,7 +102,11 @@ func (m *mockDockerClient) ContainerExecAttach(_ context.Context, _ string, _ co
 	// header: [stream_type, 0, 0, 0, size(4 bytes big-endian)]
 	// stream_type: 1=stdout, 2=stderr
 	output := m.execOutput
-	header := []byte{1, 0, 0, 0, 0, 0, 0, byte(len(output))}
+	size := uint32(len(output))
+	header := []byte{
+		1, 0, 0, 0,
+		byte(size >> 24), byte(size >> 16), byte(size >> 8), byte(size),
+	}
 	data := append(header, []byte(output)...)
 
 	conn := &mockConn{data: data}

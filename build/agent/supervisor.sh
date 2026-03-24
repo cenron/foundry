@@ -44,18 +44,28 @@ launch() {
 
     cd "$worktree"
 
-    # Launch Claude Code agent
+    # Use a FIFO so claude runs as its own process and we capture its PID directly,
+    # rather than capturing the PID of the pipeline's subshell.
+    local fifo
+    fifo=$(mktemp -u)
+    mkfifo "$fifo"
+
+    # Log consumer reads from the FIFO in the background.
+    while IFS= read -r line; do
+        echo "[agent:${role}] $line"
+    done < "$fifo" &
+
+    # Launch Claude Code agent writing to the FIFO; capture its PID directly.
     claude --bare \
         -p "$task_prompt" \
         --output-format stream-json \
         --model "$model" \
         --dangerously-skip-permissions \
         --no-session-persistence \
-        2>&1 | while IFS= read -r line; do
-            echo "[agent:${role}] $line"
-        done &
+        > "$fifo" 2>&1 &
 
     local agent_pid=$!
+    rm -f "$fifo"
     register_agent "$role" "$agent_pid" "$worktree"
 
     # Monitor the process

@@ -28,6 +28,10 @@ func NewWorkspaceBuilder(library *Library, templatePath string) *WorkspaceBuilde
 }
 
 func (b *WorkspaceBuilder) BuildWorkspace(cfg WorkspaceConfig, outputDir string) error {
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("creating output directory: %w", err)
+	}
+
 	roleDef, err := b.library.GetByName(cfg.AgentRole)
 	if err != nil {
 		return fmt.Errorf("loading role definition: %w", err)

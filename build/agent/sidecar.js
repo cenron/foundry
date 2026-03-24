@@ -41,13 +41,20 @@ async function connectRabbitMQ() {
 
 function handleCommand(command) {
   switch (command.type) {
-    case "assign_task":
+    case "assign_task": {
+      // Validate agent_role to prevent path traversal.
+      const agentRole = command.agent_role || "";
+      if (!/^[a-z0-9-]+$/.test(agentRole)) {
+        console.error(`[sidecar] invalid agent_role: ${agentRole}`);
+        break;
+      }
       // Write task assignment to shared volume for the target agent
-      const taskFile = path.join("/shared", "tasks", `${command.agent_role}.json`);
+      const taskFile = path.join("/shared", "tasks", `${agentRole}.json`);
       fs.mkdirSync(path.dirname(taskFile), { recursive: true });
       fs.writeFileSync(taskFile, JSON.stringify(command, null, 2));
       publishEvent("task_assigned", command);
       break;
+    }
 
     case "pause_agent":
       // Signal the supervisor to pause

@@ -22,8 +22,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 RUN curl -fsSL https://go.dev/dl/go1.26.1.linux-amd64.tar.gz | tar -C /usr/local -xz
 ENV PATH="/usr/local/go/bin:${PATH}"
 
-# Claude Code CLI
-RUN npm install -g @anthropic-ai/claude-code
+# Claude Code CLI — version-pinned via build arg for reproducible builds.
+ARG CLAUDE_VERSION=latest
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_VERSION}
 
 # Runtime directories
 RUN mkdir -p /workspace /worktrees /shared /agents \

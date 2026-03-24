@@ -7,14 +7,17 @@ echo "[foundry] team container starting for project $PROJECT_ID"
 if [ ! -d "/workspace/.git" ]; then
     echo "[foundry] cloning repository..."
     if [ -n "${GIT_TOKEN:-}" ]; then
-        REPO_WITH_TOKEN=$(echo "$REPO_URL" | sed "s|https://|https://${GIT_TOKEN}@|")
-        git clone "$REPO_WITH_TOKEN" /workspace
+        git -c "http.extraHeader=Authorization: Bearer ${GIT_TOKEN}" clone "$REPO_URL" /workspace
     else
         git clone "$REPO_URL" /workspace
     fi
 else
     echo "[foundry] workspace already cloned, pulling latest..."
-    cd /workspace && git pull --ff-only || true
+    if [ -n "${GIT_TOKEN:-}" ]; then
+        cd /workspace && git -c "http.extraHeader=Authorization: Bearer ${GIT_TOKEN}" pull --ff-only || true
+    else
+        cd /workspace && git pull --ff-only || true
+    fi
 fi
 
 cd /workspace

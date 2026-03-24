@@ -107,7 +107,7 @@ func (h *HealthMonitor) checkAll(ctx context.Context) {
 
 func (h *HealthMonitor) checkOne(ctx context.Context, containerID string) {
 	h.mu.Lock()
-	ch, ok := h.containers[containerID]
+	_, ok := h.containers[containerID]
 	if !ok {
 		h.mu.Unlock()
 		return
@@ -122,21 +122,41 @@ func (h *HealthMonitor) checkOne(ctx context.Context, containerID string) {
 	}
 
 	h.mu.Lock()
-	defer h.mu.Unlock()
 
-	if beatFresh {
-		if !ch.healthy {
-			h.markHealthy(ctx, ch)
-		}
-		ch.missedBeats = 0
-		ch.healthy = true
+	// Re-check: container may have been deregistered while exec ran.
+	ch, ok := h.containers[containerID]
+	if !ok {
+		h.mu.Unlock()
 		return
 	}
 
-	ch.missedBeats++
-	if ch.missedBeats >= h.threshold && ch.healthy {
-		h.markUnhealthy(ctx, ch)
-		ch.healthy = false
+	var shouldMarkHealthy, shouldMarkUnhealthy bool
+
+	if beatFresh {
+		if !ch.healthy {
+			shouldMarkHealthy = true
+		}
+		ch.missedBeats = 0
+		ch.healthy = true
+	} else {
+		ch.missedBeats++
+		if ch.missedBeats >= h.threshold && ch.healthy {
+			shouldMarkUnhealthy = true
+			ch.healthy = false
+		}
+	}
+
+	// Capture the projectID needed for side effects before releasing the lock.
+	projectID := ch.projectID
+
+	h.mu.Unlock()
+
+	// Perform external side effects outside the lock.
+	if shouldMarkHealthy {
+		h.markHealthy(ctx, projectID)
+	}
+	if shouldMarkUnhealthy {
+		h.markUnhealthy(ctx, projectID)
 	}
 }
 
@@ -150,20 +170,20 @@ func (h *HealthMonitor) isFreshBeat(output string) bool {
 	return h.now().Sub(beatTime) < h.interval*2
 }
 
-func (h *HealthMonitor) markUnhealthy(ctx context.Context, ch *containerHealth) {
-	if err := h.agents.UpdateHealthByProject(ctx, ch.projectID, "unhealthy"); err != nil {
+func (h *HealthMonitor) markUnhealthy(ctx context.Context, projectID string) {
+	if err := h.agents.UpdateHealthByProject(ctx, projectID, "unhealthy"); err != nil {
 		log.Printf("health monitor: updating agents unhealthy: %v", err)
 	}
 
-	h.publishHealthEvent(ctx, ch.projectID, "container_unhealthy")
+	h.publishHealthEvent(ctx, projectID, "container_unhealthy")
 }
 
-func (h *HealthMonitor) markHealthy(ctx context.Context, ch *containerHealth) {
-	if err := h.agents.UpdateHealthByProject(ctx, ch.projectID, "healthy"); err != nil {
+func (h *HealthMonitor) markHealthy(ctx context.Context, projectID string) {
+	if err := h.agents.UpdateHealthByProject(ctx, projectID, "healthy"); err != nil {
 		log.Printf("health monitor: updating agents healthy: %v", err)
 	}
 
-	h.publishHealthEvent(ctx, ch.projectID, "container_healthy")
+	h.publishHealthEvent(ctx, projectID, "container_healthy")
 }
 
 func (h *HealthMonitor) publishHealthEvent(ctx context.Context, projectID, eventType string) {
