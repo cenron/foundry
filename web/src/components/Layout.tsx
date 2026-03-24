@@ -1,10 +1,13 @@
-import { Link } from 'react-router-dom'
+import { Link, useMatch } from 'react-router-dom'
 
 interface LayoutProps {
   children: React.ReactNode
 }
 
 export function Layout({ children }: LayoutProps) {
+  const projectMatch = useMatch('/projects/:id/*')
+  const projectId = projectMatch?.params.id
+
   return (
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white border-b border-gray-200">
@@ -17,6 +20,14 @@ export function Layout({ children }: LayoutProps) {
               <Link to="/" className="text-sm text-gray-600 hover:text-gray-900">
                 Projects
               </Link>
+              {projectId && (
+                <Link
+                  to={`/projects/${projectId}/settings`}
+                  className="text-sm text-gray-600 hover:text-gray-900"
+                >
+                  Settings
+                </Link>
+              )}
             </div>
           </div>
         </div>
