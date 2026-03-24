@@ -71,7 +71,7 @@ func (s *Service) HandleAgentUnhealthy(ctx context.Context, taskID shared.ID) er
 	return nil
 }
 
-// AssignUnblockedTasks finds pending tasks with resolved deps and assigns them.
+// assignUnblockedTasks finds pending tasks with resolved deps and assigns them.
 func (s *Service) assignUnblockedTasks(ctx context.Context, projectID shared.ID) error {
 	unblocked, err := s.dag.GetUnblockedTasks(ctx, projectID)
 	if err != nil {
@@ -121,16 +121,19 @@ func (s *Service) assignTask(ctx context.Context, task *Task, agent AvailableAge
 }
 
 func (s *Service) sendAssignCommand(ctx context.Context, task *Task, agent AvailableAgent) error {
-	cmd, _ := json.Marshal(map[string]string{
-		"type":       "assign_task",
-		"task_id":    task.ID.String(),
-		"project_id": task.ProjectID.String(),
-		"agent_role": agent.Role,
-		"title":      task.Title,
+	cmd, err := json.Marshal(map[string]string{
+		"type":        "assign_task",
+		"task_id":     task.ID.String(),
+		"project_id":  task.ProjectID.String(),
+		"agent_role":  agent.Role,
+		"title":       task.Title,
 		"description": task.Description,
 	})
+	if err != nil {
+		return fmt.Errorf("marshaling assign command: %w", err)
+	}
 
-	routingKey := fmt.Sprintf("commands.%s.%s", task.ProjectID, agent.ID)
+	routingKey := fmt.Sprintf("commands.%s.%s", task.ProjectID.String(), agent.ID.String())
 	return s.commands.Publish(ctx, "foundry.commands", routingKey, cmd)
 }
 

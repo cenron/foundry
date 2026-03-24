@@ -120,6 +120,11 @@ func (r *Router) updateCache(env eventEnvelope) {
 		return
 	}
 
+	if env.ProjectID == "" {
+		log.Printf("event router: skipping cache update: missing project_id")
+		return
+	}
+
 	ctx := context.Background()
 
 	// Cache latest event per project for quick dashboard reads

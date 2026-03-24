@@ -3,8 +3,12 @@ package cache
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
+	"log"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -43,8 +47,11 @@ func (c *ResponseCache) Get(ctx context.Context, key ResponseCacheKey) (string, 
 	var response string
 	err := c.client.Get(ctx, hash, &response)
 	if err != nil {
-		c.incrementCounter(ctx, missCountPrefix+key.ProjectID)
-		return "", false, nil // cache miss, not an error
+		if errors.Is(err, redis.Nil) {
+			c.incrementCounter(ctx, missCountPrefix+key.ProjectID)
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("getting cached response: %w", err)
 	}
 
 	c.incrementCounter(ctx, hitCountPrefix+key.ProjectID)
@@ -79,7 +86,7 @@ func (c *ResponseCache) HitRate(ctx context.Context, projectID string) (float64,
 }
 
 func (c *ResponseCache) incrementCounter(ctx context.Context, key string) {
-	var current int
-	_ = c.client.Get(ctx, key, &current)
-	_ = c.client.Set(ctx, key, current+1, 24*time.Hour)
+	if err := c.client.Incr(ctx, key, 24*time.Hour); err != nil {
+		log.Printf("response cache: incrementing counter %q: %v", key, err)
+	}
 }

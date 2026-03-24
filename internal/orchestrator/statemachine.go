@@ -73,16 +73,25 @@ func isValidTransition(from, to string) bool {
 }
 
 func (sm *StateMachine) publishTransitionEvent(ctx context.Context, task *Task, newStatus string) {
-	payload, _ := json.Marshal(map[string]string{
-		"task_id":    task.ID.String(),
+	envelope := map[string]interface{}{
 		"project_id": task.ProjectID.String(),
-		"from":       task.Status,
-		"to":         newStatus,
-		"title":      task.Title,
-	})
+		"task_id":    task.ID.String(),
+		"type":       "task.transition",
+		"payload": map[string]string{
+			"from":  task.Status,
+			"to":    newStatus,
+			"title": task.Title,
+		},
+	}
 
-	routingKey := fmt.Sprintf("events.%s.task_%s", task.ProjectID, newStatus)
-	if err := sm.publisher.Publish(ctx, "foundry.events", routingKey, payload); err != nil {
+	body, err := json.Marshal(envelope)
+	if err != nil {
+		log.Printf("state machine: marshaling transition event: %v", err)
+		return
+	}
+
+	routingKey := fmt.Sprintf("events.%s.task_%s", task.ProjectID.String(), newStatus)
+	if err := sm.publisher.Publish(ctx, "foundry.events", routingKey, body); err != nil {
 		log.Printf("state machine: publishing transition event: %v", err)
 	}
 }

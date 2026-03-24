@@ -40,6 +40,9 @@ func (d *DAGResolver) ValidateDependencies(tasks []Task) error {
 		}
 
 		for _, depID := range t.DependsOn {
+			if _, exists := taskMap[depID]; !exists {
+				return fmt.Errorf("task %q depends on unknown task %q", id, depID)
+			}
 			inDegree[id]++
 			dependents[depID] = append(dependents[depID], id)
 		}

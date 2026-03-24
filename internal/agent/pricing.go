@@ -73,33 +73,35 @@ type BudgetEventPublisher interface {
 }
 
 type BudgetTracker struct {
-	store      TokenUsageUpdater
-	publisher  BudgetEventPublisher
-	priceTable PriceTable
+	store     TokenUsageUpdater
+	publisher BudgetEventPublisher
+
+	// emittedThresholds tracks the highest threshold emitted per project
+	// to prevent duplicate events on every token update.
+	emittedThresholds map[string]float64
 }
 
-func NewBudgetTracker(store TokenUsageUpdater, publisher BudgetEventPublisher, table PriceTable) *BudgetTracker {
+func NewBudgetTracker(store TokenUsageUpdater, publisher BudgetEventPublisher) *BudgetTracker {
 	return &BudgetTracker{
-		store:      store,
-		publisher:  publisher,
-		priceTable: table,
+		store:             store,
+		publisher:         publisher,
+		emittedThresholds: make(map[string]float64),
 	}
 }
 
 // RecordUsage records token usage and checks budget thresholds.
-func (bt *BudgetTracker) RecordUsage(ctx context.Context, projectID, taskID, model string, usage TokenUsage) error {
+func (bt *BudgetTracker) RecordUsage(ctx context.Context, projectID, taskID string, usage TokenUsage) error {
 	totalTokens := usage.InputTokens + usage.OutputTokens
 	if err := bt.store.AddTokenUsage(ctx, taskID, totalTokens); err != nil {
 		return fmt.Errorf("recording token usage: %w", err)
 	}
 
-	cost := CalculateCost(usage, model, bt.priceTable)
-	bt.checkThresholds(ctx, projectID, cost)
+	bt.checkThresholds(ctx, projectID)
 
 	return nil
 }
 
-func (bt *BudgetTracker) checkThresholds(ctx context.Context, projectID string, _ float64) {
+func (bt *BudgetTracker) checkThresholds(ctx context.Context, projectID string) {
 	thresholds := []float64{0.50, 0.75, 0.90}
 
 	totalTokens, err := bt.store.GetProjectTokenUsage(ctx, projectID)
@@ -108,25 +110,35 @@ func (bt *BudgetTracker) checkThresholds(ctx context.Context, projectID string, 
 		return
 	}
 
-	// Simple threshold check based on a default budget of 1M tokens
-	// In production, this would read from the project's spec.token_estimate
+	// Simple threshold check based on a default budget of 1M tokens.
+	// In production this would read from the project's spec.token_estimate.
 	budgetTokens := 1_000_000
 	utilization := float64(totalTokens) / float64(budgetTokens)
 
 	for _, threshold := range thresholds {
-		if utilization >= threshold && utilization < threshold+0.01 {
-			bt.publishThresholdEvent(ctx, projectID, threshold, utilization)
+		if utilization < threshold {
+			continue
 		}
+		// Only emit each threshold once — skip if already emitted.
+		if bt.emittedThresholds[projectID] >= threshold {
+			continue
+		}
+		bt.emittedThresholds[projectID] = threshold
+		bt.publishThresholdEvent(ctx, projectID, threshold, utilization)
 	}
 }
 
 func (bt *BudgetTracker) publishThresholdEvent(ctx context.Context, projectID string, threshold, utilization float64) {
-	payload, _ := json.Marshal(map[string]interface{}{
+	payload, err := json.Marshal(map[string]interface{}{
 		"project_id":  projectID,
 		"type":        "budget_threshold",
 		"threshold":   threshold,
 		"utilization": utilization,
 	})
+	if err != nil {
+		log.Printf("budget tracker: marshaling threshold event: %v", err)
+		return
+	}
 
 	routingKey := fmt.Sprintf("events.%s.budget_threshold", projectID)
 	if err := bt.publisher.Publish(ctx, "foundry.events", routingKey, payload); err != nil {
