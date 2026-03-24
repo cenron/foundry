@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS spec_mutations;
+DROP TABLE IF EXISTS specs;
