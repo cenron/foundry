@@ -110,13 +110,21 @@ func (s *Server) handleUpdateRiskProfile(w http.ResponseWriter, r *http.Request)
 		modelRouting = req.ModelRouting
 	}
 
-	profile, err := s.deps.RiskProfiles.Update(r.Context(), existing.ID, project.UpdateRiskProfileParams{
+	params := project.UpdateRiskProfileParams{
 		Name:           name,
 		LowCriteria:    lowCriteria,
 		MediumCriteria: mediumCriteria,
 		HighCriteria:   highCriteria,
 		ModelRouting:   modelRouting,
-	})
+	}
+
+	var profile *project.RiskProfile
+	if existing.ProjectID == nil {
+		// The resolved profile is the global default; create a project-specific copy instead.
+		profile, err = s.deps.RiskProfiles.Create(r.Context(), projectID, params)
+	} else {
+		profile, err = s.deps.RiskProfiles.Update(r.Context(), existing.ID, params)
+	}
 	if err != nil {
 		RespondError(w, err)
 		return

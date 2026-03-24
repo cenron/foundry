@@ -103,6 +103,8 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 	}
 	if pageSize < 1 {
 		pageSize = 20
+	} else if pageSize > 100 {
+		pageSize = 100
 	}
 
 	projects, total, err := s.deps.Projects.List(r.Context(), page, pageSize)
@@ -180,12 +182,21 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	name := p.Name
 	if req.Name != "" {
-		p.Name = req.Name
-	}
-	if req.Description != "" {
-		p.Description = req.Description
+		name = req.Name
 	}
 
-	RespondJSON(w, http.StatusOK, p)
+	description := p.Description
+	if req.Description != "" {
+		description = req.Description
+	}
+
+	updated, err := s.deps.Projects.Update(r.Context(), id, name, description)
+	if err != nil {
+		RespondError(w, err)
+		return
+	}
+
+	RespondJSON(w, http.StatusOK, updated)
 }

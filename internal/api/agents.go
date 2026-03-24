@@ -140,6 +140,11 @@ func (s *Server) publishAgentCommand(w http.ResponseWriter, r *http.Request, act
 		return
 	}
 
+	if s.deps.Broker == nil {
+		RespondError(w, fmt.Errorf("broker not configured"))
+		return
+	}
+
 	routingKey := fmt.Sprintf("commands.%s.%s", projectID, agentID)
 	if err := s.deps.Broker.Publish(r.Context(), broker.ExchangeCommands, routingKey, body); err != nil {
 		RespondError(w, err)
@@ -209,6 +214,11 @@ func (s *Server) publishProjectCommand(w http.ResponseWriter, r *http.Request, a
 	agents, err := s.deps.Agents.ListByProject(r.Context(), projectID)
 	if err != nil {
 		RespondError(w, err)
+		return
+	}
+
+	if s.deps.Broker == nil {
+		RespondError(w, fmt.Errorf("broker not configured"))
 		return
 	}
 

@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/lib/pq"
@@ -43,6 +45,9 @@ func (s *TaskStore) GetByID(ctx context.Context, id shared.ID) (*Task, error) {
 	var task Task
 	err := s.db.GetContext(ctx, &task, "SELECT * FROM tasks WHERE id = $1", id)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &shared.NotFoundError{Resource: "task", ID: id.String()}
+		}
 		return nil, fmt.Errorf("getting task %s: %w", id, err)
 	}
 	return &task, nil

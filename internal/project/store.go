@@ -2,7 +2,9 @@ package project
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/cenron/foundry/internal/shared"
@@ -41,6 +43,9 @@ func (s *Store) GetByID(ctx context.Context, id shared.ID) (*Project, error) {
 	var p Project
 	err := s.db.GetContext(ctx, &p, "SELECT * FROM projects WHERE id = $1", id)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &shared.NotFoundError{Resource: "project", ID: id.String()}
+		}
 		return nil, fmt.Errorf("getting project %s: %w", id, err)
 	}
 	return &p, nil
@@ -64,6 +69,18 @@ func (s *Store) List(ctx context.Context, page, pageSize int) ([]Project, int, e
 	}
 
 	return projects, total, nil
+}
+
+func (s *Store) Update(ctx context.Context, id shared.ID, name, description string) (*Project, error) {
+	var p Project
+	err := s.db.QueryRowxContext(ctx,
+		"UPDATE projects SET name = $1, description = $2, updated_at = now() WHERE id = $3 RETURNING *",
+		name, description, id,
+	).StructScan(&p)
+	if err != nil {
+		return nil, fmt.Errorf("updating project %s: %w", id, err)
+	}
+	return &p, nil
 }
 
 func (s *Store) UpdateStatus(ctx context.Context, id shared.ID, status string) error {
@@ -107,6 +124,9 @@ func (s *SpecStore) GetByProjectID(ctx context.Context, projectID shared.ID) (*S
 		projectID,
 	)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &shared.NotFoundError{Resource: "spec", ID: projectID.String()}
+		}
 		return nil, fmt.Errorf("getting spec for project %s: %w", projectID, err)
 	}
 	return &spec, nil
