@@ -18,7 +18,7 @@ type Task struct {
 	RiskLevel          string          `db:"risk_level" json:"risk_level"`
 	AssignedRole       string          `db:"assigned_role" json:"assigned_role"`
 	AssignedAgentID    *shared.ID      `db:"assigned_agent_id" json:"assigned_agent_id,omitempty"`
-	DependsOn          pq.StringArray  `db:"depends_on" json:"depends_on"`
+	DependsOn          pq.StringArray  `db:"depends_on" json:"depends_on" swaggertype:"array,string"`
 	AutomationEligible bool           `db:"automation_eligible" json:"automation_eligible"`
 	ModelTier          string          `db:"model_tier" json:"model_tier"`
 	TokenUsage         int             `db:"token_usage" json:"token_usage"`

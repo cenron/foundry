@@ -61,7 +61,10 @@ func main() {
 	}
 	log.Println("migrations applied")
 
-	srv := api.NewServer(db, cacheClient, brokerClient)
+	srv := api.NewServer(api.ServerDeps{
+		Cache:  cacheClient,
+		Broker: brokerClient,
+	})
 
 	httpServer := &http.Server{
 		Addr:         ":" + cfg.APIPort,

@@ -13,7 +13,7 @@ type Project struct {
 	Description     string          `db:"description" json:"description"`
 	Status          string          `db:"status" json:"status"`
 	RepoURL         string          `db:"repo_url" json:"repo_url"`
-	TeamComposition json.RawMessage `db:"team_composition" json:"team_composition"`
+	TeamComposition json.RawMessage `db:"team_composition" json:"team_composition" swaggertype:"array,string"`
 	ContainerID     *string         `db:"container_id" json:"container_id,omitempty"`
 	RiskProfileID   *shared.ID      `db:"risk_profile_id" json:"risk_profile_id,omitempty"`
 	CreatedAt       time.Time       `db:"created_at" json:"created_at"`

@@ -10,7 +10,7 @@ import (
 )
 
 func TestHealthEndpoint(t *testing.T) {
-	srv := api.NewServer(nil, nil, nil)
+	srv := api.NewServer(api.ServerDeps{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	w := httptest.NewRecorder()
@@ -32,7 +32,7 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestNotFoundRoute(t *testing.T) {
-	srv := api.NewServer(nil, nil, nil)
+	srv := api.NewServer(api.ServerDeps{})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/nonexistent", nil)
 	w := httptest.NewRecorder()

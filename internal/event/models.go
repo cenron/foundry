@@ -13,7 +13,7 @@ type Event struct {
 	TaskID    *shared.ID      `db:"task_id" json:"task_id,omitempty"`
 	AgentID   *shared.ID      `db:"agent_id" json:"agent_id,omitempty"`
 	Type      string          `db:"type" json:"type"`
-	Payload   json.RawMessage `db:"payload" json:"payload"`
+	Payload   json.RawMessage `db:"payload" json:"payload" swaggertype:"object"`
 	CreatedAt time.Time       `db:"created_at" json:"created_at"`
 }
 
