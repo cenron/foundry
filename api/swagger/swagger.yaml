@@ -1,0 +1,36 @@
+basePath: /api
+consumes:
+- application/json
+definitions:
+  api.HealthResponse:
+    properties:
+      status:
+        example: ok
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: Spec-driven AI development platform — orchestrates teams of Claude
+    Code agents.
+  title: Foundry API
+  version: 0.1.0
+paths:
+  /health:
+    get:
+      description: Returns the health status of the Foundry API
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.HealthResponse'
+      summary: Health check
+      tags:
+      - system
+produces:
+- application/json
+schemes:
+- http
+swagger: "2.0"

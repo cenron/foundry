@@ -13,9 +13,13 @@ Spec-driven AI development platform that orchestrates teams of Claude Code agent
 - Set up a `.air.toml` config at the project root to configure build commands, watched directories, and excluded paths.
 - Use `go-chi/chi` for HTTP routing. Lightweight, `net/http` compatible, composable middleware.
 - Use `jmoiron/sqlx` for database access. Hand-written SQL, no ORM. `sqlx.Get`/`sqlx.Select` for struct scanning, `db.NamedExec` for named parameters.
+- Use `github.com/swaggo/swag` for Swagger annotations on every handler. Annotations are mandatory — the frontend generates its API client from `swagger.json`.
+- Use `github.com/swaggo/http-swagger/v2` to serve Swagger UI.
+- Run `make swagger` to generate `api/swagger/swagger.json` from annotations.
+- Run `make generate` to regenerate both swagger spec and frontend API client.
 - Use `gorilla/websocket` for WebSocket support.
 - Use Docker SDK for Go (`github.com/docker/docker/client`) for container management.
-- Use `streadway/amqp` for RabbitMQ.
+- Use `rabbitmq/amqp091-go` for RabbitMQ (import alias: `amqp`).
 - Use `go-redis/v9` for Redis.
 
 When debugging library internals in Go, find the source in the module cache:
@@ -47,6 +51,11 @@ make docker-up          # Start Postgres, Redis, RabbitMQ
 make docker-down        # Stop dev infrastructure
 make migrate-up         # Run database migrations
 make migrate-down       # Rollback last migration
+
+# Swagger / API codegen
+make swagger            # Generate swagger.json from Go annotations
+make web-generate-api   # Generate frontend API client from swagger
+make generate           # Both: swagger + web-generate-api
 
 # Frontend
 cd web && npm run dev   # Start Vite dev server
