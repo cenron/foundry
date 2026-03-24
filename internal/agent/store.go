@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/cenron/foundry/internal/shared"
@@ -34,6 +36,9 @@ func (s *Store) GetByID(ctx context.Context, id shared.ID) (*Agent, error) {
 	var a Agent
 	err := s.db.GetContext(ctx, &a, "SELECT * FROM agents WHERE id = $1", id)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &shared.NotFoundError{Resource: "agent", ID: id.String()}
+		}
 		return nil, fmt.Errorf("getting agent %s: %w", id, err)
 	}
 	return &a, nil

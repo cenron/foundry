@@ -2,10 +2,243 @@ basePath: /api
 consumes:
 - application/json
 definitions:
+  agent.Agent:
+    properties:
+      branch_name:
+        type: string
+      container_id:
+        type: string
+      created_at:
+        type: string
+      current_task_id:
+        type: string
+      health:
+        type: string
+      id:
+        type: string
+      process_id:
+        type: string
+      project_id:
+        type: string
+      provider:
+        type: string
+      role:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+      worktree_path:
+        type: string
+    type: object
+  agent.AgentDefinition:
+    properties:
+      content:
+        description: markdown body after frontmatter
+        type: string
+      description:
+        type: string
+      model:
+        type: string
+      name:
+        type: string
+      tools:
+        type: string
+    type: object
+  api.CreateProjectRequest:
+    properties:
+      description:
+        type: string
+      name:
+        type: string
+      repo_url:
+        type: string
+      team_composition:
+        items:
+          type: string
+        type: array
+    type: object
+  api.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
   api.HealthResponse:
     properties:
       status:
         example: ok
+        type: string
+    type: object
+  api.ProjectListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/project.Project'
+        type: array
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total_count:
+        type: integer
+    type: object
+  api.TaskUsage:
+    properties:
+      model_tier:
+        type: string
+      task_id:
+        type: string
+      title:
+        type: string
+      token_usage:
+        type: integer
+    type: object
+  api.UpdateProjectRequest:
+    properties:
+      description:
+        type: string
+      name:
+        type: string
+    type: object
+  api.UpdateRiskProfileRequest:
+    properties:
+      high_criteria:
+        type: object
+      low_criteria:
+        type: object
+      medium_criteria:
+        type: object
+      model_routing:
+        type: object
+      name:
+        type: string
+    type: object
+  api.UpdateSpecRequest:
+    properties:
+      agent_count:
+        type: integer
+      approved_content:
+        type: string
+      execution_content:
+        type: string
+      token_estimate:
+        type: integer
+    type: object
+  api.UsageResponse:
+    properties:
+      project_id:
+        type: string
+      task_breakdown:
+        items:
+          $ref: '#/definitions/api.TaskUsage'
+        type: array
+      total_tokens:
+        type: integer
+    type: object
+  orchestrator.Task:
+    properties:
+      assigned_agent_id:
+        type: string
+      assigned_role:
+        type: string
+      automation_eligible:
+        type: boolean
+      context_summary:
+        type: string
+      created_at:
+        type: string
+      depends_on:
+        items:
+          type: string
+        type: array
+      description:
+        type: string
+      id:
+        type: string
+      model_tier:
+        type: string
+      project_id:
+        type: string
+      risk_level:
+        type: string
+      spec_id:
+        type: string
+      status:
+        type: string
+      title:
+        type: string
+      token_usage:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  project.Project:
+    properties:
+      container_id:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      repo_url:
+        type: string
+      risk_profile_id:
+        type: string
+      status:
+        type: string
+      team_composition:
+        items:
+          type: string
+        type: array
+      updated_at:
+        type: string
+    type: object
+  project.RiskProfile:
+    properties:
+      created_at:
+        type: string
+      high_criteria:
+        type: object
+      id:
+        type: string
+      low_criteria:
+        type: object
+      medium_criteria:
+        type: object
+      model_routing:
+        type: object
+      name:
+        type: string
+      project_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  project.Spec:
+    properties:
+      agent_count:
+        type: integer
+      approval_status:
+        type: string
+      approved_at:
+        type: string
+      approved_content:
+        type: string
+      created_at:
+        type: string
+      execution_content:
+        type: string
+      id:
+        type: string
+      project_id:
+        type: string
+      token_estimate:
+        type: integer
+      updated_at:
         type: string
     type: object
 host: localhost:8080
@@ -16,6 +249,21 @@ info:
   title: Foundry API
   version: 0.1.0
 paths:
+  /agents/library:
+    get:
+      description: Returns all available agent role definitions from the agent library
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/agent.AgentDefinition'
+            type: array
+      summary: List agent library
+      tags:
+      - library
   /health:
     get:
       description: Returns the health status of the Foundry API
@@ -29,6 +277,764 @@ paths:
       summary: Health check
       tags:
       - system
+  /projects:
+    get:
+      description: Returns a paginated list of all projects
+      parameters:
+      - description: Page number (default 1)
+        in: query
+        name: page
+        type: integer
+      - description: Items per page (default 20)
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.ProjectListResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: List projects
+      tags:
+      - projects
+    post:
+      consumes:
+      - application/json
+      description: Creates a new project with the given details
+      parameters:
+      - description: Project details
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.CreateProjectRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/project.Project'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Create project
+      tags:
+      - projects
+  /projects/{id}:
+    get:
+      description: Returns the project with the given ID
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/project.Project'
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Project not found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Get project
+      tags:
+      - projects
+    patch:
+      consumes:
+      - application/json
+      description: Updates the name and/or description of a project
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.UpdateProjectRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/project.Project'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Project not found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Update project
+      tags:
+      - projects
+  /projects/{id}/agents:
+    get:
+      description: Returns all agents for the given project
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/agent.Agent'
+            type: array
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: List agents
+      tags:
+      - agents
+  /projects/{id}/agents/{agentId}:
+    get:
+      description: Returns the agent with the given ID
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Agent ID
+        in: path
+        name: agentId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/agent.Agent'
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Agent not found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Get agent
+      tags:
+      - agents
+  /projects/{id}/agents/{agentId}/pause:
+    post:
+      description: Publishes a pause command for the given agent
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Agent ID
+        in: path
+        name: agentId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Pause agent
+      tags:
+      - agents
+  /projects/{id}/agents/{agentId}/resume:
+    post:
+      description: Publishes a resume command for the given agent
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Agent ID
+        in: path
+        name: agentId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Resume agent
+      tags:
+      - agents
+  /projects/{id}/pause:
+    post:
+      description: Publishes pause commands for all agents in the project
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Pause project
+      tags:
+      - projects
+  /projects/{id}/po/chat:
+    delete:
+      description: Stub endpoint — PO session manager not yet implemented
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "501":
+          description: Not implemented
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: End PO chat (stub)
+      tags:
+      - po
+    post:
+      description: Stub endpoint — PO session manager not yet implemented
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "501":
+          description: Not implemented
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: PO chat (stub)
+      tags:
+      - po
+  /projects/{id}/po/estimation:
+    post:
+      description: Stub endpoint — PO session manager not yet implemented
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "501":
+          description: Not implemented
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: PO estimation (stub)
+      tags:
+      - po
+  /projects/{id}/po/planning:
+    post:
+      description: Stub endpoint — PO session manager not yet implemented
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "501":
+          description: Not implemented
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: PO planning (stub)
+      tags:
+      - po
+  /projects/{id}/po/status:
+    get:
+      description: Stub endpoint — returns inactive status until PO session manager
+        is implemented
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: PO status (stub)
+      tags:
+      - po
+  /projects/{id}/resume:
+    post:
+      description: Publishes resume commands for all agents in the project
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Resume project
+      tags:
+      - projects
+  /projects/{id}/risk-profile:
+    get:
+      description: Returns the risk profile for the given project; falls back to the
+        global default
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/project.RiskProfile'
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Risk profile not found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Get risk profile
+      tags:
+      - risk-profiles
+    put:
+      consumes:
+      - application/json
+      description: Updates the risk classification criteria and model routing for
+        the given project
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Risk profile fields
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.UpdateRiskProfileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/project.RiskProfile'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Risk profile not found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Update risk profile
+      tags:
+      - risk-profiles
+  /projects/{id}/spec:
+    get:
+      description: Returns the spec associated with the given project
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/project.Spec'
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Spec not found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Get spec
+      tags:
+      - specs
+    put:
+      consumes:
+      - application/json
+      description: Replaces the spec content for the given project; creates if none
+        exists
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Spec content
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.UpdateSpecRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/project.Spec'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Project not found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Update spec
+      tags:
+      - specs
+  /projects/{id}/spec/approve:
+    post:
+      description: Approves the spec for the given project; requires content and token
+        estimate
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/project.Spec'
+        "400":
+          description: Spec not ready for approval
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Spec not found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Approve spec
+      tags:
+      - specs
+  /projects/{id}/spec/reject:
+    post:
+      description: Rejects the spec for the given project and returns the project
+        to planning
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/project.Spec'
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Spec not found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Reject spec
+      tags:
+      - specs
+  /projects/{id}/start:
+    post:
+      description: Initiates project execution (stub — full implementation in Phase
+        6)
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Start project
+      tags:
+      - projects
+  /projects/{id}/tasks:
+    get:
+      description: Returns all tasks for the given project; optionally filter by status
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Filter by task status
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/orchestrator.Task'
+            type: array
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: List tasks
+      tags:
+      - tasks
+  /projects/{id}/tasks/{taskId}:
+    get:
+      description: Returns the task with the given ID
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Task ID
+        in: path
+        name: taskId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/orchestrator.Task'
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Task not found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Get task
+      tags:
+      - tasks
+  /projects/{id}/usage:
+    get:
+      description: Returns token usage aggregated across all tasks for the given project
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.UsageResponse'
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Get usage
+      tags:
+      - usage
 produces:
 - application/json
 schemes:

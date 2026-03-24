@@ -20,11 +20,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cenron/foundry/internal/agent"
 	"github.com/cenron/foundry/internal/api"
 	"github.com/cenron/foundry/internal/broker"
 	"github.com/cenron/foundry/internal/cache"
 	"github.com/cenron/foundry/internal/config"
 	"github.com/cenron/foundry/internal/database"
+	"github.com/cenron/foundry/internal/orchestrator"
+	"github.com/cenron/foundry/internal/project"
 
 	_ "github.com/cenron/foundry/api/swagger"
 )
@@ -61,7 +64,15 @@ func main() {
 	}
 	log.Println("migrations applied")
 
-	srv := api.NewServer(db, cacheClient, brokerClient)
+	srv := api.NewServer(api.ServerDeps{
+		Cache:        cacheClient,
+		Broker:       brokerClient,
+		Projects:     project.NewStore(db),
+		Specs:        project.NewSpecStore(db),
+		Tasks:        orchestrator.NewTaskStore(db),
+		Agents:       agent.NewStore(db),
+		RiskProfiles: project.NewRiskProfileStore(db),
+	})
 
 	httpServer := &http.Server{
 		Addr:         ":" + cfg.APIPort,
