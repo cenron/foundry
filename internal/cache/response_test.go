@@ -143,3 +143,44 @@ func TestResponseCache_HitRate(t *testing.T) {
 		t.Errorf("hit rate = %f, want ~0.667", rate)
 	}
 }
+
+func TestResponseCache_HitRate_ZeroTotal(t *testing.T) {
+	rc := setupResponseCache(t)
+	ctx := context.Background()
+
+	// Project with no requests — hit rate should be 0 without error.
+	rate, err := rc.HitRate(ctx, "proj-no-requests")
+	if err != nil {
+		t.Fatalf("HitRate() error: %v", err)
+	}
+	if rate != 0 {
+		t.Errorf("hit rate = %f, want 0 for project with no requests", rate)
+	}
+}
+
+func TestResponseCache_Set_ZeroTTL_UsesDefault(t *testing.T) {
+	rc := setupResponseCache(t)
+	ctx := context.Background()
+
+	key := cache.ResponseCacheKey{
+		ProjectID: "proj-zero-ttl",
+		Prompt:    "test prompt",
+		Model:     "haiku",
+	}
+
+	// Zero TTL should use the default TTL (5 minutes) instead of 0.
+	if err := rc.Set(ctx, key, "response", 0); err != nil {
+		t.Fatalf("Set() with zero TTL error: %v", err)
+	}
+
+	resp, hit, err := rc.Get(ctx, key)
+	if err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	if !hit {
+		t.Fatal("expected hit after Set with zero TTL")
+	}
+	if resp != "response" {
+		t.Errorf("response = %q, want %q", resp, "response")
+	}
+}

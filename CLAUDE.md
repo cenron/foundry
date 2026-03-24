@@ -138,11 +138,12 @@ Phase start
 ### Rules
 
 1. **Never skip the phase gate.** Every test suite runs at the end of every phase. If any fail, fix them before the PR.
-2. **UI phases use Playwright.** Any phase that adds or modifies UI components must include Playwright E2E tests. Use the `playwright-mcp` server for in-browser validation.
-3. **One PR per phase.** Each phase is a logical unit of work with its own branch (`phase/<name>` or `feat/<name>`). One PR per phase, opened only when the phase gate passes.
-4. **Stop after the PR.** Do not start the next phase until instructed. The PR may have review feedback that needs addressing first.
-5. **Test between steps.** Don't batch up implementation. Write test → implement → verify → commit. Tight loops catch issues early.
-6. **Fix forward, don't skip.** If a test fails at the phase gate, fix the issue. Don't disable the test, skip it, or mark it as expected failure.
+2. **80% code coverage minimum — non-negotiable.** Every phase must maintain at least 80% statement coverage for Go (`go test -cover`) and 70% for frontend (`vitest --coverage`). Measure before the PR. If coverage drops below threshold, add tests before proceeding. No exceptions.
+3. **UI phases use Playwright.** Any phase that adds or modifies UI components must include comprehensive Playwright E2E tests. E2E tests are part of the phase, not an afterthought. Write them alongside the components.
+4. **One PR per phase.** Each phase is a logical unit of work with its own branch (`phase/<name>` or `feat/<name>`). One PR per phase, opened only when the phase gate passes.
+5. **Stop after the PR.** Do not start the next phase until instructed. The PR may have review feedback that needs addressing first.
+6. **Test between steps.** Don't batch up implementation. Write test → implement → verify → commit. Tight loops catch issues early.
+7. **Fix forward, don't skip.** If a test fails at the phase gate, fix the issue. Don't disable the test, skip it, or mark it as expected failure.
 
 ### Phase reference
 
@@ -157,6 +158,7 @@ See `docs/specs/implementation-plan.md` for the full phased plan. Summary:
 | 4 | Project lifecycle API + PO API | `phase/project-api` | No |
 | 5 | React UI + token dashboard + PO chat | `phase/ui` | Yes |
 | 6 | Integration + PO workspace | `phase/integration` | Yes |
+| 7 | Local mode (optional) | `phase/local-mode` | No |
 
 ## Code Patterns
 

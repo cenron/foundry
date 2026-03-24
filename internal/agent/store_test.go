@@ -7,6 +7,7 @@ import (
 
 	"github.com/cenron/foundry/internal/agent"
 	"github.com/cenron/foundry/internal/database"
+	"github.com/cenron/foundry/internal/orchestrator"
 	"github.com/cenron/foundry/internal/project"
 	"github.com/jmoiron/sqlx"
 )
@@ -28,6 +29,7 @@ func setupTestDB(t *testing.T) *sqlx.DB {
 	}
 
 	t.Cleanup(func() {
+		_, _ = db.Exec("DELETE FROM tasks")
 		_, _ = db.Exec("DELETE FROM agents")
 		_, _ = db.Exec("DELETE FROM projects")
 		_ = db.Close()
@@ -162,5 +164,52 @@ func TestAgentStore_UpdateHealth(t *testing.T) {
 	got, _ := store.GetByID(context.Background(), a.ID)
 	if got.Health != "unhealthy" {
 		t.Errorf("Health = %q, want %q", got.Health, "unhealthy")
+	}
+}
+
+func TestAgentStore_UpdateCurrentTask_SetAndClear(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db := setupTestDB(t)
+	store := agent.NewStore(db)
+	proj := createTestProject(t, db)
+
+	a, _ := store.Create(context.Background(), agent.CreateAgentParams{
+		ProjectID: proj.ID, Role: "backend", Provider: "claude", ContainerID: "c-1",
+	})
+
+	// Create a task to reference.
+	taskStore := orchestrator.NewTaskStore(db)
+	task, err := taskStore.Create(context.Background(), orchestrator.CreateTaskParams{
+		ProjectID: proj.ID,
+		Title:     "Current task test",
+	})
+	if err != nil {
+		t.Fatalf("creating task: %v", err)
+	}
+
+	// Set a current task.
+	if err := store.UpdateCurrentTask(context.Background(), a.ID, &task.ID); err != nil {
+		t.Fatalf("UpdateCurrentTask(set) error: %v", err)
+	}
+
+	got, _ := store.GetByID(context.Background(), a.ID)
+	if got.CurrentTaskID == nil {
+		t.Fatal("CurrentTaskID should be set, got nil")
+	}
+	if *got.CurrentTaskID != task.ID {
+		t.Errorf("CurrentTaskID = %v, want %v", *got.CurrentTaskID, task.ID)
+	}
+
+	// Clear the current task.
+	if err := store.UpdateCurrentTask(context.Background(), a.ID, nil); err != nil {
+		t.Fatalf("UpdateCurrentTask(clear) error: %v", err)
+	}
+
+	got, _ = store.GetByID(context.Background(), a.ID)
+	if got.CurrentTaskID != nil {
+		t.Errorf("CurrentTaskID should be nil after clearing, got %v", got.CurrentTaskID)
 	}
 }

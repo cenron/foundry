@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/cenron/foundry/internal/agent"
 	"github.com/cenron/foundry/internal/database"
 	"github.com/cenron/foundry/internal/orchestrator"
 	"github.com/cenron/foundry/internal/project"
@@ -30,6 +31,7 @@ func setupTestDB(t *testing.T) *sqlx.DB {
 
 	t.Cleanup(func() {
 		_, _ = db.Exec("DELETE FROM tasks")
+		_, _ = db.Exec("DELETE FROM agents")
 		_, _ = db.Exec("DELETE FROM projects")
 		_ = db.Close()
 	})
@@ -145,6 +147,38 @@ func TestTaskStore_UpdateStatus(t *testing.T) {
 	got, _ := store.GetByID(context.Background(), task.ID)
 	if got.Status != "in_progress" {
 		t.Errorf("Status = %q, want %q", got.Status, "in_progress")
+	}
+}
+
+func TestTaskStore_UpdateAssignment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db := setupTestDB(t)
+	taskStore := orchestrator.NewTaskStore(db)
+	agentStore := agent.NewStore(db)
+	proj := createTestProject(t, db)
+
+	a, _ := agentStore.Create(context.Background(), agent.CreateAgentParams{
+		ProjectID: proj.ID, Role: "backend", Provider: "claude", ContainerID: "c-1",
+	})
+
+	task, _ := taskStore.Create(context.Background(), orchestrator.CreateTaskParams{
+		ProjectID: proj.ID,
+		Title:     "Assignment test",
+	})
+
+	if err := taskStore.UpdateAssignment(context.Background(), task.ID, a.ID); err != nil {
+		t.Fatalf("UpdateAssignment() error: %v", err)
+	}
+
+	got, _ := taskStore.GetByID(context.Background(), task.ID)
+	if got.Status != "assigned" {
+		t.Errorf("Status = %q, want %q", got.Status, "assigned")
+	}
+	if got.AssignedAgentID == nil || *got.AssignedAgentID != a.ID {
+		t.Errorf("AssignedAgentID = %v, want %v", got.AssignedAgentID, a.ID)
 	}
 }
 
