@@ -26,6 +26,7 @@ import (
 	"github.com/cenron/foundry/internal/cache"
 	"github.com/cenron/foundry/internal/config"
 	"github.com/cenron/foundry/internal/database"
+	"github.com/cenron/foundry/internal/event"
 	"github.com/cenron/foundry/internal/orchestrator"
 	"github.com/cenron/foundry/internal/po"
 	"github.com/cenron/foundry/internal/project"
@@ -59,10 +60,9 @@ func main() {
 	}
 	log.Println("migrations applied")
 
-	agentLibrary, err := agent.NewLibrary(cfg.AgentLibraryPath)
+	lib, err := agent.NewLibrary(cfg.AgentLibraryPath)
 	if err != nil {
 		log.Printf("agent library: %v (continuing without library)", err)
-		agentLibrary = nil
 	}
 
 	// Extract embedded PO workspace (CLAUDE.md + playbooks) to foundry home.
@@ -80,18 +80,20 @@ func main() {
 		Specs:        project.NewSpecStore(db),
 		Tasks:        orchestrator.NewTaskStore(db),
 		Agents:       agent.NewStore(db),
+		Library:      lib,
 		RiskProfiles: project.NewRiskProfileStore(db),
-		Library:      agentLibrary,
 		PO:           poManager,
 		FoundryHome:  cfg.FoundryHome,
 	}
+
+	var brokerClient *broker.Client
 
 	if cfg.IsLocalMode() {
 		log.Println("local mode: skipping RabbitMQ, using local runtime")
 		deps.Runtime = runtime.NewLocalRuntime(cfg.MaxConcurrentAgents)
 		deps.PO = po.NewLocalSessionManager(cfg.FoundryHome, cfg.ClaudeVersion)
 	} else {
-		brokerClient, err := broker.Connect(ctx, cfg.RabbitMQURL)
+		brokerClient, err = broker.Connect(ctx, cfg.RabbitMQURL)
 		if err != nil {
 			log.Fatalf("broker: %v", err)
 		}
@@ -101,6 +103,17 @@ func main() {
 	}
 
 	srv := api.NewServer(deps)
+
+	// Event router — only in Docker mode (needs broker for subscriptions).
+	if brokerClient != nil {
+		eventStore := event.NewStore(db)
+		eventRouter := event.NewRouter(eventStore, srv.Hub(), cacheClient, brokerClient)
+		if err := eventRouter.Start(); err != nil {
+			log.Printf("event router: %v", err)
+		}
+	}
+
+	log.Printf("runtime mode: %s", cfg.RuntimeMode)
 
 	httpServer := &http.Server{
 		Addr:         ":" + cfg.APIPort,

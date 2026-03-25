@@ -54,6 +54,11 @@ func (s *Server) Handler() http.Handler {
 	return s.router
 }
 
+// Hub returns the WebSocket hub so external components can broadcast to clients.
+func (s *Server) Hub() *Hub {
+	return s.hub
+}
+
 func (s *Server) setupRoutes() {
 	r := s.router
 

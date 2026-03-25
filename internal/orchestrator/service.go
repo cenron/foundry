@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/cenron/foundry/internal/broker"
 	"github.com/cenron/foundry/internal/shared"
 )
 
@@ -138,7 +139,7 @@ func publishAssignCommand(ctx context.Context, pub CommandPublisher, task *Task,
 	}
 
 	routingKey := fmt.Sprintf("commands.%s.%s", task.ProjectID.String(), agent.ID.String())
-	return pub.Publish(ctx, "foundry.commands", routingKey, cmd)
+	return pub.Publish(ctx, broker.ExchangeCommands, routingKey, cmd)
 }
 
 func indexAgentsByRole(agents []AvailableAgent) map[string][]AvailableAgent {
