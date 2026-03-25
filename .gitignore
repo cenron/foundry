@@ -36,4 +36,3 @@ web/playwright-report/
 
 # Generated
 web/src/api/generated/
-api/swagger/
