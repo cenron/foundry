@@ -25,15 +25,8 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
+import { statusClass } from '@/lib/status'
 import { cn } from '@/lib/utils'
-
-const STATUS_CLASSES: Record<string, string> = {
-  draft: 'bg-gray-100 text-gray-700',
-  planning: 'bg-blue-100 text-blue-700',
-  active: 'bg-green-100 text-green-700',
-  paused: 'bg-yellow-100 text-yellow-700',
-  completed: 'bg-purple-100 text-purple-700',
-}
 
 export function ProjectDashboard() {
   const { id } = useParams<{ id: string }>()
@@ -80,7 +73,7 @@ export function ProjectDashboard() {
   }
 
   const status = project.status ?? 'draft'
-  const statusClass = STATUS_CLASSES[status] ?? STATUS_CLASSES.draft
+  const badgeClass = statusClass(status)
 
   return (
     <div className="flex flex-col gap-6">
@@ -88,7 +81,7 @@ export function ProjectDashboard() {
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-bold">{project.name}</h1>
 
-        <Badge variant="outline" className={cn('capitalize', statusClass)}>
+        <Badge variant="outline" className={cn('capitalize', badgeClass)}>
           {status}
         </Badge>
 

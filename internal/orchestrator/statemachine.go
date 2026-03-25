@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/cenron/foundry/internal/broker"
 	"github.com/cenron/foundry/internal/shared"
 )
 
@@ -91,7 +92,7 @@ func (sm *StateMachine) publishTransitionEvent(ctx context.Context, task *Task, 
 	}
 
 	routingKey := fmt.Sprintf("events.%s.task_%s", task.ProjectID.String(), newStatus)
-	if err := sm.publisher.Publish(ctx, "foundry.events", routingKey, body); err != nil {
+	if err := sm.publisher.Publish(ctx, broker.ExchangeEvents, routingKey, body); err != nil {
 		log.Printf("state machine: publishing transition event: %v", err)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"log"
 
 	"github.com/cenron/foundry/internal/agent"
+	"github.com/cenron/foundry/internal/broker"
 	"github.com/cenron/foundry/internal/shared"
 )
 
@@ -139,5 +140,5 @@ func (m *PauseManager) sendAgentCommand(ctx context.Context, a agent.Agent, cmdT
 	}
 
 	routingKey := fmt.Sprintf("commands.%s.%s", a.ProjectID.String(), a.ID.String())
-	return m.commands.Publish(ctx, "foundry.commands", routingKey, body)
+	return m.commands.Publish(ctx, broker.ExchangeCommands, routingKey, body)
 }

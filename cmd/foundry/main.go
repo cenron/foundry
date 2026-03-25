@@ -26,6 +26,7 @@ import (
 	"github.com/cenron/foundry/internal/cache"
 	"github.com/cenron/foundry/internal/config"
 	"github.com/cenron/foundry/internal/database"
+	"github.com/cenron/foundry/internal/event"
 	"github.com/cenron/foundry/internal/orchestrator"
 	"github.com/cenron/foundry/internal/po"
 	"github.com/cenron/foundry/internal/project"
@@ -65,6 +66,11 @@ func main() {
 	}
 	log.Println("migrations applied")
 
+	lib, err := agent.NewLibrary(cfg.AgentLibraryPath)
+	if err != nil {
+		log.Printf("agent library: %v (continuing without library)", err)
+	}
+
 	srv := api.NewServer(api.ServerDeps{
 		Cache:        cacheClient,
 		Broker:       brokerClient,
@@ -72,9 +78,16 @@ func main() {
 		Specs:        project.NewSpecStore(db),
 		Tasks:        orchestrator.NewTaskStore(db),
 		Agents:       agent.NewStore(db),
+		Library:      lib,
 		RiskProfiles: project.NewRiskProfileStore(db),
 		PO:           po.NewSessionManager(cfg.FoundryHome, cfg.AnthropicAPIKey, cfg.ClaudeVersion),
 	})
+
+	eventStore := event.NewStore(db)
+	eventRouter := event.NewRouter(eventStore, srv.Hub(), cacheClient, brokerClient)
+	if err := eventRouter.Start(); err != nil {
+		log.Printf("event router: %v", err)
+	}
 
 	httpServer := &http.Server{
 		Addr:         ":" + cfg.APIPort,
