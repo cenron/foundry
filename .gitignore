@@ -12,6 +12,7 @@ Thumbs.db
 *~
 
 # Go
+/foundry
 /bin/
 /tmp/
 /vendor/

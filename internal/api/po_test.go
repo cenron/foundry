@@ -3,11 +3,45 @@ package api_test
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/cenron/foundry/internal/api"
 	"github.com/cenron/foundry/internal/po"
 )
+
+// stubClaudeForAPI creates a temp directory containing a shell script named "claude"
+// that sleeps for 30 seconds (simulating a long-running agent). It prepends the
+// directory to PATH for the duration of the test.
+func stubClaudeForAPI(t *testing.T) {
+	t.Helper()
+
+	sleepPath, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skip("sleep not available, skipping")
+	}
+
+	claudeDir := t.TempDir()
+	claudeScript := filepath.Join(claudeDir, "claude")
+	script := "#!/bin/sh\n" + sleepPath + " 30\n"
+	if err := os.WriteFile(claudeScript, []byte(script), 0755); err != nil {
+		t.Fatalf("creating claude stub: %v", err)
+	}
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", claudeDir+":"+origPath)
+}
+
+// newPOServerWithStub creates a PO-configured server where StartSession succeeds
+// because a fake "claude" binary is on PATH.
+func newPOServerWithStub(t *testing.T) *api.Server {
+	t.Helper()
+	stubClaudeForAPI(t)
+	sm := po.NewSessionManager(t.TempDir(), "test-key", "latest")
+	return api.NewServer(api.ServerDeps{PO: sm})
+}
 
 // newPOServer builds a test server with a SessionManager injected so the
 // PO != nil code paths are exercised.
@@ -248,6 +282,66 @@ func TestPOEstimation_WithPO_ActiveSession_IsIdempotent(t *testing.T) {
 	w := doRequest(t, srv, http.MethodGet, "/api/projects/00000000-0000-0000-0000-000000000001/po/status", "")
 	if w.Code == http.StatusNotImplemented {
 		t.Errorf("status = 501, but PO is configured — should not return 501")
+	}
+}
+
+// --- PO chat/planning/estimation with a working claude stub ---
+
+func TestPOChat_WithPO_StartsSession_Returns200(t *testing.T) {
+	srv := newPOServerWithStub(t)
+
+	w := doRequest(t, srv, http.MethodPost,
+		"/api/projects/00000000-0000-0000-0000-000000000001/po/chat",
+		`{"message":"hello PO"}`)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if body["status"] != "session started" {
+		t.Errorf("status = %q, want %q", body["status"], "session started")
+	}
+}
+
+func TestPOPlanning_WithPO_StartsSession_Returns200(t *testing.T) {
+	srv := newPOServerWithStub(t)
+
+	w := doRequest(t, srv, http.MethodPost,
+		"/api/projects/00000000-0000-0000-0000-000000000001/po/planning", "")
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if body["status"] != "planning session started" {
+		t.Errorf("status = %q, want %q", body["status"], "planning session started")
+	}
+}
+
+func TestPOEstimation_WithPO_StartsSession_Returns200(t *testing.T) {
+	srv := newPOServerWithStub(t)
+
+	w := doRequest(t, srv, http.MethodPost,
+		"/api/projects/00000000-0000-0000-0000-000000000001/po/estimation", "")
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if body["status"] != "estimation session started" {
+		t.Errorf("status = %q, want %q", body["status"], "estimation session started")
 	}
 }
 

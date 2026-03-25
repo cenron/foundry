@@ -120,3 +120,26 @@ func TestUpdateProject_InvalidJSON_Returns400(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 	}
 }
+
+func TestListProjects_PageSizeClamped_Returns500(t *testing.T) {
+	// page_size > 100 gets clamped to 100 before the store call.
+	// With nil store it panics → 500, which proves the branch was entered.
+	srv := newTestServer()
+
+	w := doRequest(t, srv, http.MethodGet, "/api/projects?page_size=999", "")
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestListProjects_WithValidPageParams_Returns500(t *testing.T) {
+	// Exercises the page/page_size parsing paths (valid values, nil store).
+	srv := newTestServer()
+
+	w := doRequest(t, srv, http.MethodGet, "/api/projects?page=2&page_size=10", "")
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}

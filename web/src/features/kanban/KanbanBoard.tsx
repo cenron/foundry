@@ -20,9 +20,10 @@ function groupTasks(tasks: OrchestratorTask[]) {
 }
 
 export function KanbanBoard({ projectId }: KanbanBoardProps) {
-  const { data: tasks = [], isLoading } = useQuery(
-    getProjectsByIdTasksOptions({ path: { id: projectId } })
-  )
+  const { data: tasks, isLoading } = useQuery({
+    ...getProjectsByIdTasksOptions({ path: { id: projectId } }),
+    refetchInterval: 5000,
+  })
 
   if (isLoading) {
     return (
@@ -30,7 +31,7 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
     )
   }
 
-  const groups = groupTasks(tasks)
+  const groups = groupTasks(tasks ?? [])
 
   return (
     <div className="grid grid-cols-4 gap-4">

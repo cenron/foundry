@@ -99,9 +99,6 @@ foundry/
 │   ├── docker-compose.yml          # Dev infrastructure (Postgres, Redis, RabbitMQ)
 │   ├── Dockerfile                  # Foundry backend image
 │   └── agent/                      # Team container image
-├── foundry-po/                     # PO workspace source (deploys to ~/foundry/)
-│   ├── CLAUDE.md                   # Base PO instructions
-│   └── playbooks/                  # Session-type playbooks (6 files)
 ├── migrations/                     # SQL migration files
 ├── docs/
 │   ├── design-principles.md        # Core engineering philosophy

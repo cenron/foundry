@@ -1,6 +1,7 @@
 package po
 
 import (
+	"embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,6 +51,45 @@ func ScaffoldProjectWorkspace(foundryHome, projectName, repoURL string, techStac
 	yamlPath := filepath.Join(projectDir, "project.yaml")
 	if err := writeProjectYAML(yamlPath, projectName, repoURL, techStack); err != nil {
 		return fmt.Errorf("writing project.yaml: %w", err)
+	}
+
+	return nil
+}
+
+// DeployPOWorkspace extracts the embedded PO workspace (CLAUDE.md + playbooks/)
+// to the foundry home directory. The files are compiled into the binary via go:embed,
+// so this works regardless of where the binary is installed — fully self-contained.
+func DeployPOWorkspace(foundryHome string) error {
+	return extractEmbeddedDir(WorkspaceFS, "po_workspace", foundryHome)
+}
+
+func extractEmbeddedDir(fsys embed.FS, root, dst string) error {
+	entries, err := fsys.ReadDir(root)
+	if err != nil {
+		return fmt.Errorf("reading embedded dir %s: %w", root, err)
+	}
+
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return fmt.Errorf("creating %s: %w", dst, err)
+	}
+
+	for _, entry := range entries {
+		srcPath := root + "/" + entry.Name()
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			if err := extractEmbeddedDir(fsys, srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			data, err := fsys.ReadFile(srcPath)
+			if err != nil {
+				return fmt.Errorf("reading embedded file %s: %w", srcPath, err)
+			}
+			if err := os.WriteFile(dstPath, data, 0o644); err != nil {
+				return fmt.Errorf("writing %s: %w", dstPath, err)
+			}
+		}
 	}
 
 	return nil

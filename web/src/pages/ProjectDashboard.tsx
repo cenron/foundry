@@ -43,9 +43,10 @@ export function ProjectDashboard() {
 
   const queryClient = useQueryClient()
 
-  const { data: project, isLoading } = useQuery(
-    getProjectsByIdOptions({ path: { id: projectId } })
-  )
+  const { data: project, isLoading } = useQuery({
+    ...getProjectsByIdOptions({ path: { id: projectId } }),
+    refetchInterval: 5000,
+  })
 
   const invalidateProject = () => {
     queryClient.invalidateQueries({
@@ -93,16 +94,7 @@ export function ProjectDashboard() {
         </Badge>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          {status === 'draft' || status === 'planning' ? (
-            <Button
-              size="sm"
-              onClick={() => startMutation.mutate({ path: { id: projectId } })}
-              disabled={startMutation.isPending}
-            >
-              <Play />
-              Start
-            </Button>
-          ) : status === 'active' ? (
+          {status === 'active' ? (
             <Button
               size="sm"
               variant="outline"
@@ -121,9 +113,18 @@ export function ProjectDashboard() {
               <RotateCcw />
               Resume
             </Button>
-          ) : null}
+          ) : (
+            <Button
+              size="sm"
+              onClick={() => startMutation.mutate({ path: { id: projectId } })}
+              disabled={startMutation.isPending || status === 'completed'}
+            >
+              <Play />
+              Start
+            </Button>
+          )}
 
-          <POChatWindow />
+          <POChatWindow projectId={projectId} />
 
           {/* Spec panel trigger */}
           <Sheet open={specOpen} onOpenChange={setSpecOpen}>

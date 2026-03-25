@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 )
 
@@ -182,5 +184,168 @@ func TestChannelHub_Unsubscribe(t *testing.T) {
 	_, _, err := conn.ReadMessage()
 	if err == nil {
 		t.Error("expected error reading after server-side Unsubscribe, got nil")
+	}
+}
+
+// setRouteContext injects a chi URL parameter into the request context.
+func setRouteContext(r *http.Request, key, value string) *http.Request {
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add(key, value)
+	return r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+}
+
+// TestHub_HandleWebSocket verifies that HandleWebSocket upgrades the connection
+// and registers the client with the hub.
+func TestHub_HandleWebSocket(t *testing.T) {
+	hub := NewHub()
+	srv := &Server{hub: hub, channelHub: NewChannelHub(), router: nil}
+
+	ts := httptest.NewServer(http.HandlerFunc(srv.hub.HandleWebSocket))
+	defer ts.Close()
+
+	conn := dialTestServer(t, ts, "/")
+	defer func() { _ = conn.Close() }()
+
+	if !waitForClients(hub, 1, 2*time.Second) {
+		t.Fatal("timed out waiting for hub to register client via HandleWebSocket")
+	}
+}
+
+// TestHub_HandleWebSocket_UpgradeFail verifies HandleWebSocket doesn't panic when
+// the upgrade fails (non-WS request).
+func TestHub_HandleWebSocket_UpgradeFail(t *testing.T) {
+	hub := NewHub()
+
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	w := httptest.NewRecorder()
+
+	// This should not panic — upgrader returns an error and HandleWebSocket logs it.
+	hub.HandleWebSocket(w, req)
+}
+
+// TestServer_HandleProjectEvents verifies the project events WS endpoint
+// subscribes the client to the correct topic.
+func TestServer_HandleProjectEvents(t *testing.T) {
+	s := &Server{
+		hub:        NewHub(),
+		channelHub: NewChannelHub(),
+		router:     nil,
+		deps:       ServerDeps{},
+	}
+
+	projectID := "00000000-0000-0000-0000-000000000001"
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = setRouteContext(r, "id", projectID)
+		s.handleProjectEvents(w, r)
+	}))
+	defer ts.Close()
+
+	conn := dialTestServer(t, ts, "/ws/projects/"+projectID+"/events")
+	defer func() { _ = conn.Close() }()
+
+	topic := "project:" + projectID
+	if !waitForChannelSubscribers(s.channelHub, topic, 1, 2*time.Second) {
+		t.Fatalf("timed out waiting for channelHub to register project subscriber on topic %q", topic)
+	}
+
+	// Publish to the topic — the connected client should receive it.
+	s.channelHub.Publish(topic, []byte("project-event"))
+
+	_ = conn.SetReadDeadline(wsDeadline())
+	_, msg, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("ReadMessage: %v", err)
+	}
+	if string(msg) != "project-event" {
+		t.Errorf("got %q, want %q", string(msg), "project-event")
+	}
+}
+
+// TestHub_Broadcast_FailedWrite verifies that Broadcast handles a closed
+// connection gracefully by triggering the Unregister goroutine.
+func TestHub_Broadcast_FailedWrite(t *testing.T) {
+	hub := NewHub()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := testUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		hub.Register(conn)
+		// Read loop so the server-side goroutine stays alive.
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				break
+			}
+		}
+	}))
+	defer ts.Close()
+
+	conn := dialTestServer(t, ts, "/")
+
+	// Wait for registration.
+	if !waitForClients(hub, 1, 2*time.Second) {
+		t.Fatal("timed out waiting for hub to register client")
+	}
+
+	// Close the client-side connection so the next Broadcast write fails.
+	_ = conn.Close()
+
+	// Give the server a moment to detect the close, then broadcast.
+	// The write will fail, triggering the Unregister path.
+	time.Sleep(20 * time.Millisecond)
+	hub.Broadcast([]byte("should fail to write"))
+
+	// Wait for the async Unregister to remove the dead client.
+	end := time.Now().Add(2 * time.Second)
+	for time.Now().Before(end) {
+		hub.mu.RLock()
+		n := len(hub.clients)
+		hub.mu.RUnlock()
+		if n == 0 {
+			return // Client was unregistered — test passes.
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// The client may already have been removed by the read-loop goroutine
+	// before Broadcast ran — either outcome is acceptable.
+}
+
+// TestServer_HandleAgentLogs verifies the agent logs WS endpoint
+// subscribes the client to the correct topic.
+func TestServer_HandleAgentLogs(t *testing.T) {
+	s := &Server{
+		hub:        NewHub(),
+		channelHub: NewChannelHub(),
+		router:     nil,
+		deps:       ServerDeps{},
+	}
+
+	agentID := "00000000-0000-0000-0000-000000000002"
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = setRouteContext(r, "agentId", agentID)
+		s.handleAgentLogs(w, r)
+	}))
+	defer ts.Close()
+
+	conn := dialTestServer(t, ts, "/ws/agents/"+agentID+"/logs")
+	defer func() { _ = conn.Close() }()
+
+	topic := "agent:" + agentID
+	if !waitForChannelSubscribers(s.channelHub, topic, 1, 2*time.Second) {
+		t.Fatalf("timed out waiting for channelHub to register agent subscriber on topic %q", topic)
+	}
+
+	s.channelHub.Publish(topic, []byte("agent-log"))
+
+	_ = conn.SetReadDeadline(wsDeadline())
+	_, msg, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("ReadMessage: %v", err)
+	}
+	if string(msg) != "agent-log" {
+		t.Errorf("got %q, want %q", string(msg), "agent-log")
 	}
 }

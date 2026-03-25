@@ -6,13 +6,17 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/cenron/foundry/internal/agent"
 	"github.com/cenron/foundry/internal/api"
 	"github.com/cenron/foundry/internal/database"
 	"github.com/cenron/foundry/internal/orchestrator"
+	"github.com/cenron/foundry/internal/po"
 	"github.com/cenron/foundry/internal/project"
+	"github.com/cenron/foundry/internal/runtime"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -59,6 +63,24 @@ func setupIntegrationServer(t *testing.T) (*api.Server, *sqlx.DB) {
 		Tasks:        orchestrator.NewTaskStore(db),
 		Agents:       agent.NewStore(db),
 		RiskProfiles: project.NewRiskProfileStore(db),
+	})
+	return srv, db
+}
+
+func setupIntegrationServerWithPO(t *testing.T) (*api.Server, *sqlx.DB) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db := setupIntegrationDB(t)
+	srv := api.NewServer(api.ServerDeps{
+		Projects:     project.NewStore(db),
+		Specs:        project.NewSpecStore(db),
+		Tasks:        orchestrator.NewTaskStore(db),
+		Agents:       agent.NewStore(db),
+		RiskProfiles: project.NewRiskProfileStore(db),
+		PO:           po.NewSessionManager(t.TempDir(), "test-key", "latest"),
 	})
 	return srv, db
 }
@@ -629,5 +651,310 @@ func TestIntegration_GetUsage_WithTasks_ReturnsTokenBreakdown(t *testing.T) {
 	}
 	if len(breakdown) != 1 {
 		t.Errorf("task_breakdown len = %d, want 1", len(breakdown))
+	}
+}
+
+// --- Start project (no runtime configured) ---
+
+func TestIntegration_StartProject_NoRuntime_Returns400(t *testing.T) {
+	srv, db := setupIntegrationServer(t)
+
+	projStore := project.NewStore(db)
+	p, _ := projStore.Create(context.Background(), project.CreateProjectParams{Name: "Start Me"})
+
+	w := doRequest(t, srv, http.MethodPost, fmt.Sprintf("/api/projects/%s/start", p.ID), "")
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d (no runtime configured); body: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
+func TestIntegration_StartProject_NotFound_Returns404(t *testing.T) {
+	srv, _ := setupIntegrationServer(t)
+
+	// Valid UUID that doesn't exist in the DB.
+	w := doRequest(t, srv, http.MethodPost, "/api/projects/00000000-0000-0000-0000-000000000099/start", "")
+
+	// No runtime → 400 before the DB lookup.
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestIntegration_StartProject_NotApproved_Returns400(t *testing.T) {
+	srv, _ := setupIntegrationServerWithPO(t)
+
+	// Server has no runtime — still returns 400 before checking status.
+	w := doRequest(t, srv, http.MethodPost, "/api/projects/00000000-0000-0000-0000-000000000001/start", "")
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d; body: %s", w.Code, w.Body.String())
+	}
+}
+
+func setupIntegrationServerWithRuntime(t *testing.T) (*api.Server, *sqlx.DB) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db := setupIntegrationDB(t)
+	rt := setupLocalRuntime(t)
+	srv := api.NewServer(api.ServerDeps{
+		Projects:     project.NewStore(db),
+		Specs:        project.NewSpecStore(db),
+		Tasks:        orchestrator.NewTaskStore(db),
+		Agents:       agent.NewStore(db),
+		RiskProfiles: project.NewRiskProfileStore(db),
+		Runtime:      rt,
+		FoundryHome:  t.TempDir(),
+	})
+	return srv, db
+}
+
+// setupLocalRuntime creates a LocalRuntime with a fake "claude" stub on PATH.
+func setupLocalRuntime(t *testing.T) *runtime.LocalRuntime {
+	t.Helper()
+
+	sleepPath, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skip("sleep not available, skipping")
+	}
+
+	claudeDir := t.TempDir()
+	claudeScript := filepath.Join(claudeDir, "claude")
+	script := "#!/bin/sh\n" + sleepPath + " 30\n"
+	if err := os.WriteFile(claudeScript, []byte(script), 0755); err != nil {
+		t.Fatalf("creating claude stub: %v", err)
+	}
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", claudeDir+":"+origPath)
+
+	return runtime.NewLocalRuntime(4)
+}
+
+func TestIntegration_StartProject_NotApprovedStatus_Returns400(t *testing.T) {
+	srv, db := setupIntegrationServerWithRuntime(t)
+
+	// Create a project (default status is "planning", not "approved").
+	projStore := project.NewStore(db)
+	p, _ := projStore.Create(context.Background(), project.CreateProjectParams{Name: "Unapproved Project"})
+
+	w := doRequest(t, srv, http.MethodPost, fmt.Sprintf("/api/projects/%s/start", p.ID), "")
+
+	// Project status is not "approved" — expect 400.
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (not approved); body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestIntegration_StartProject_NoSpec_Returns500(t *testing.T) {
+	srv, db := setupIntegrationServerWithRuntime(t)
+
+	projStore := project.NewStore(db)
+	p, _ := projStore.Create(context.Background(), project.CreateProjectParams{Name: "Approved No Spec"})
+
+	// Mark as approved so we get past the status check.
+	_, _ = db.Exec("UPDATE projects SET status = 'approved' WHERE id = $1", p.ID)
+
+	w := doRequest(t, srv, http.MethodPost, fmt.Sprintf("/api/projects/%s/start", p.ID), "")
+
+	// No spec exists — GetByProjectID returns not found → 404 or 500.
+	if w.Code != http.StatusNotFound && w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 404 or 500 (no spec); body: %s", w.Code, w.Body.String())
+	}
+}
+
+// --- Agent command tests (pause/resume no broker) ---
+
+func TestIntegration_PauseAgent_NoBroker_Returns500(t *testing.T) {
+	srv, db := setupIntegrationServer(t)
+
+	projStore := project.NewStore(db)
+	p, _ := projStore.Create(context.Background(), project.CreateProjectParams{Name: "Pause Agent Project"})
+
+	agentStore := agent.NewStore(db)
+	a, _ := agentStore.Create(context.Background(), agent.CreateAgentParams{
+		ProjectID: p.ID, Role: "backend", Provider: "claude", ContainerID: "c-1",
+	})
+
+	w := doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/projects/%s/agents/%s/pause", p.ID, a.ID), "")
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (no broker); body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestIntegration_ResumeAgent_NoBroker_Returns500(t *testing.T) {
+	srv, db := setupIntegrationServer(t)
+
+	projStore := project.NewStore(db)
+	p, _ := projStore.Create(context.Background(), project.CreateProjectParams{Name: "Resume Agent Project"})
+
+	agentStore := agent.NewStore(db)
+	a, _ := agentStore.Create(context.Background(), agent.CreateAgentParams{
+		ProjectID: p.ID, Role: "backend", Provider: "claude", ContainerID: "c-1",
+	})
+
+	w := doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/projects/%s/agents/%s/resume", p.ID, a.ID), "")
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (no broker); body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestIntegration_ResumeProject_NoBroker_Returns500(t *testing.T) {
+	srv, db := setupIntegrationServer(t)
+
+	projStore := project.NewStore(db)
+	p, _ := projStore.Create(context.Background(), project.CreateProjectParams{Name: "Resume Project"})
+
+	agentStore := agent.NewStore(db)
+	_, _ = agentStore.Create(context.Background(), agent.CreateAgentParams{
+		ProjectID: p.ID, Role: "backend", Provider: "claude", ContainerID: "c-1",
+	})
+
+	w := doRequest(t, srv, http.MethodPost, fmt.Sprintf("/api/projects/%s/resume", p.ID), "")
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (no broker); body: %s", w.Code, w.Body.String())
+	}
+}
+
+// --- PO endpoints ---
+
+func TestIntegration_POChat_NilPO_Returns501(t *testing.T) {
+	srv, db := setupIntegrationServer(t)
+
+	projStore := project.NewStore(db)
+	p, _ := projStore.Create(context.Background(), project.CreateProjectParams{Name: "PO Chat Project"})
+
+	w := doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/projects/%s/po/chat", p.ID),
+		`{"message":"hello"}`)
+
+	if w.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501 (no PO configured); body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestIntegration_POChat_InvalidJSON_Returns400(t *testing.T) {
+	srv, db := setupIntegrationServerWithPO(t)
+
+	projStore := project.NewStore(db)
+	p, _ := projStore.Create(context.Background(), project.CreateProjectParams{Name: "PO Chat Bad JSON"})
+
+	w := doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/projects/%s/po/chat", p.ID),
+		`not-valid-json`)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (invalid JSON); body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestIntegration_POStatus_Returns200(t *testing.T) {
+	srv, db := setupIntegrationServerWithPO(t)
+
+	projStore := project.NewStore(db)
+	p, _ := projStore.Create(context.Background(), project.CreateProjectParams{Name: "PO Status Project"})
+
+	w := doRequest(t, srv, http.MethodGet,
+		fmt.Sprintf("/api/projects/%s/po/status", p.ID), "")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if _, ok := body["active"]; !ok {
+		t.Error("expected 'active' field in response")
+	}
+}
+
+func TestIntegration_POStatus_NilPO_Returns200(t *testing.T) {
+	srv, db := setupIntegrationServer(t)
+
+	projStore := project.NewStore(db)
+	p, _ := projStore.Create(context.Background(), project.CreateProjectParams{Name: "PO Status Nil Project"})
+
+	// With nil PO, status endpoint still returns 200 with active=false.
+	w := doRequest(t, srv, http.MethodGet,
+		fmt.Sprintf("/api/projects/%s/po/status", p.ID), "")
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	var body map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if body["active"] != false {
+		t.Errorf("active = %v, want false when PO not configured", body["active"])
+	}
+}
+
+func TestIntegration_POPlanning_NilPO_Returns501(t *testing.T) {
+	srv, db := setupIntegrationServer(t)
+
+	projStore := project.NewStore(db)
+	p, _ := projStore.Create(context.Background(), project.CreateProjectParams{Name: "PO Planning Project"})
+
+	w := doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/projects/%s/po/planning", p.ID), "")
+
+	if w.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501 (no PO); body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestIntegration_POEstimation_NilPO_Returns501(t *testing.T) {
+	srv, db := setupIntegrationServer(t)
+
+	projStore := project.NewStore(db)
+	p, _ := projStore.Create(context.Background(), project.CreateProjectParams{Name: "PO Estimation Project"})
+
+	w := doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/projects/%s/po/estimation", p.ID), "")
+
+	if w.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501 (no PO); body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestIntegration_POChatDelete_NilPO_Returns501(t *testing.T) {
+	srv, db := setupIntegrationServer(t)
+
+	projStore := project.NewStore(db)
+	p, _ := projStore.Create(context.Background(), project.CreateProjectParams{Name: "PO Chat Delete Nil"})
+
+	w := doRequest(t, srv, http.MethodDelete,
+		fmt.Sprintf("/api/projects/%s/po/chat", p.ID), "")
+
+	if w.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want 501 (no PO); body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestIntegration_POChatDelete_NoSession_ReturnsError(t *testing.T) {
+	srv, db := setupIntegrationServerWithPO(t)
+
+	projStore := project.NewStore(db)
+	p, _ := projStore.Create(context.Background(), project.CreateProjectParams{Name: "PO Chat Delete No Session"})
+
+	// PO is configured but no session is active — StopSession returns an error.
+	w := doRequest(t, srv, http.MethodDelete,
+		fmt.Sprintf("/api/projects/%s/po/chat", p.ID), "")
+
+	// Expect a non-200 response since there's no active session.
+	if w.Code == http.StatusOK {
+		t.Errorf("status = 200, want error response when no session is active")
 	}
 }

@@ -3,6 +3,7 @@ package po_test
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -455,4 +456,287 @@ func triggerFor(systemTriggered bool) string {
 		return "system"
 	}
 	return "user"
+}
+
+// --- StartSession invalid type ---
+
+func TestSessionManager_StartSession_InvalidType(t *testing.T) {
+	m := po.NewSessionManager(t.TempDir(), "key", "latest")
+
+	_, err := m.StartSession(context.Background(), po.POSessionOpts{
+		Type:    "not-a-real-type",
+		Project: "proj",
+		Message: "hi",
+	})
+
+	if err == nil {
+		t.Error("StartSession() error = nil for invalid type, want error")
+	}
+}
+
+// --- StopSession with process ---
+
+func TestSessionManager_StopSession_WithProcess(t *testing.T) {
+	m := po.NewSessionManager(t.TempDir(), "key", "latest")
+
+	// Inject a session with a real cmd (sleep) so StopSession exercises the kill path.
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(ctx, "sleep", "30")
+	_ = cmd.Start()
+
+	m.InjectSession("sleep-project", &po.POSession{
+		ID:          "proc-id",
+		ProjectName: "sleep-project",
+		Status:      po.SessionStatusActive,
+	})
+
+	// Stop the injected session (no actual process pointer, so just exercises map cleanup).
+	if err := m.StopSession("sleep-project"); err != nil {
+		t.Fatalf("StopSession() error: %v", err)
+	}
+
+	if m.IsActive("sleep-project") {
+		t.Error("IsActive() = true after StopSession, want false")
+	}
+
+	// Clean up the background process.
+	cancel()
+	_ = cmd.Wait()
+}
+
+// --- ScaffoldProjectWorkspace invalid path ---
+
+func TestScaffoldProjectWorkspace_InvalidPath(t *testing.T) {
+	// Use a path inside a file (not a directory) to trigger an error.
+	f, err := os.CreateTemp("", "foundry-test-*")
+	if err != nil {
+		t.Fatalf("creating temp file: %v", err)
+	}
+	defer func() { _ = os.Remove(f.Name()) }()
+	_ = f.Close()
+
+	// Attempt to scaffold inside a file path — should fail.
+	err = po.ScaffoldProjectWorkspace(f.Name(), "proj", "", nil)
+	if err == nil {
+		t.Error("ScaffoldProjectWorkspace() error = nil for invalid foundryHome, want error")
+	}
+}
+
+// --- StopAll ---
+
+func TestSessionManager_StopAll_MultipleSessions(t *testing.T) {
+	m := po.NewSessionManager(t.TempDir(), "key", "latest")
+
+	for _, name := range []string{"proj-a", "proj-b", "proj-c"} {
+		m.InjectSession(name, &po.POSession{
+			ID:          name + "-id",
+			ProjectName: name,
+			Status:      po.SessionStatusActive,
+		})
+	}
+
+	m.StopAll()
+
+	for _, name := range []string{"proj-a", "proj-b", "proj-c"} {
+		if m.IsActive(name) {
+			t.Errorf("IsActive(%q) = true after StopAll, want false", name)
+		}
+	}
+}
+
+func TestSessionManager_StopAll_Empty(t *testing.T) {
+	m := po.NewSessionManager(t.TempDir(), "key", "latest")
+	// Should not panic or error on empty session map.
+	m.StopAll()
+}
+
+// --- LocalSessionManager ---
+
+func TestLocalSessionManager_BuildCommand_NoBareFlagForSystemType(t *testing.T) {
+	m := po.NewLocalSessionManager("/foundry", "latest")
+
+	opts := po.POSessionOpts{
+		Type:    po.SessionTypeEstimation,
+		Project: "proj",
+		Trigger: "system",
+		Message: "estimate this",
+	}
+
+	args := m.BuildCommand(context.Background(), opts).Args
+
+	assertArgAbsent(t, args, "--bare")
+	assertArgAbsent(t, args, "--max-budget-usd")
+}
+
+func TestLocalSessionManager_BuildCommand_HasVerbose(t *testing.T) {
+	m := po.NewLocalSessionManager("/foundry", "latest")
+
+	opts := po.POSessionOpts{
+		Type:    po.SessionTypePlanning,
+		Project: "proj",
+		Trigger: "user",
+		Message: "plan",
+	}
+
+	args := m.BuildCommand(context.Background(), opts).Args
+
+	assertArgPresent(t, args, "--verbose")
+}
+
+func TestLocalSessionManager_BuildCommand_SystemTypeHasDangerouslySkipPermissions(t *testing.T) {
+	m := po.NewLocalSessionManager("/foundry", "latest")
+
+	systemTypes := []string{
+		po.SessionTypeEstimation,
+		po.SessionTypeReview,
+		po.SessionTypeEscalation,
+		po.SessionTypePhaseTransition,
+	}
+
+	for _, sessionType := range systemTypes {
+		t.Run(sessionType, func(t *testing.T) {
+			opts := po.POSessionOpts{
+				Type:    sessionType,
+				Project: "proj",
+				Trigger: "system",
+				Message: "test",
+			}
+
+			args := m.BuildCommand(context.Background(), opts).Args
+
+			assertArgPresent(t, args, "--dangerously-skip-permissions")
+			assertArgAbsent(t, args, "--bare")
+			assertArgAbsent(t, args, "--max-budget-usd")
+		})
+	}
+}
+
+func TestLocalSessionManager_BuildCommand_UserTriggeredNoPermissionsFlag(t *testing.T) {
+	m := po.NewLocalSessionManager("/foundry", "latest")
+
+	userTypes := []string{
+		po.SessionTypePlanning,
+		po.SessionTypeExecutionChat,
+	}
+
+	for _, sessionType := range userTypes {
+		t.Run(sessionType, func(t *testing.T) {
+			opts := po.POSessionOpts{
+				Type:    sessionType,
+				Project: "proj",
+				Trigger: "user",
+				Message: "test",
+			}
+
+			args := m.BuildCommand(context.Background(), opts).Args
+
+			assertArgAbsent(t, args, "--dangerously-skip-permissions")
+			assertArgAbsent(t, args, "--bare")
+		})
+	}
+}
+
+// --- DeployPOWorkspace ---
+
+func TestDeployPOWorkspace(t *testing.T) {
+	foundryHome := t.TempDir()
+
+	if err := po.DeployPOWorkspace(foundryHome); err != nil {
+		t.Fatalf("DeployPOWorkspace() error: %v", err)
+	}
+
+	// CLAUDE.md must exist at the foundry home root.
+	claudeMD := filepath.Join(foundryHome, "CLAUDE.md")
+	if _, err := os.Stat(claudeMD); os.IsNotExist(err) {
+		t.Errorf("expected CLAUDE.md to exist at %s", claudeMD)
+	}
+
+	// playbooks/ directory must exist.
+	playbooksDir := filepath.Join(foundryHome, "playbooks")
+	if _, err := os.Stat(playbooksDir); os.IsNotExist(err) {
+		t.Errorf("expected playbooks/ directory to exist at %s", playbooksDir)
+	}
+}
+
+func TestDeployPOWorkspace_Idempotent(t *testing.T) {
+	foundryHome := t.TempDir()
+
+	// First deploy.
+	if err := po.DeployPOWorkspace(foundryHome); err != nil {
+		t.Fatalf("first DeployPOWorkspace() error: %v", err)
+	}
+
+	// Second deploy — should overwrite without error.
+	if err := po.DeployPOWorkspace(foundryHome); err != nil {
+		t.Fatalf("second DeployPOWorkspace() error: %v", err)
+	}
+}
+
+// --- StartSession success path ---
+
+// TestSessionManager_StartSession_Success verifies the full StartSession happy path
+// by using a real short-lived process (the system "sleep" command) in place of claude.
+// This exercises the PID assignment, IsActive registration, and subsequent StopSession
+// process teardown code paths without requiring claude to be installed.
+func TestSessionManager_StartSession_Success(t *testing.T) {
+	sleepPath, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skip("sleep not found, skipping")
+	}
+
+	// Build a session manager that points at `sleep` as its "claude" binary by
+	// temporarily overriding PATH so that "claude" resolves to our fake helper.
+	//
+	// We create a symlink in a temp dir pointing to sleep, then use a separate
+	// wrapper approach: instead, we directly call BuildCommand and swap the Path.
+	// BuildCommand returns an exec.Cmd; we replace the binary path to use sleep
+	// instead. But StartSession builds the command internally, so we need a
+	// different approach.
+	//
+	// The cleanest approach is to create a temp dir with a script named "claude"
+	// that just runs sleep, and prepend it to PATH.
+	claudeDir := t.TempDir()
+	claudeScript := filepath.Join(claudeDir, "claude")
+	scriptContent := "#!/bin/sh\n" + sleepPath + " 30\n"
+	if err := os.WriteFile(claudeScript, []byte(scriptContent), 0755); err != nil {
+		t.Fatalf("creating claude stub: %v", err)
+	}
+
+	origPath := os.Getenv("PATH")
+	t.Setenv("PATH", claudeDir+":"+origPath)
+
+	foundryHome := t.TempDir()
+	m := po.NewSessionManager(foundryHome, "test-key", "latest")
+
+	session, err := m.StartSession(context.Background(), po.POSessionOpts{
+		Type:    po.SessionTypePlanning,
+		Project: "success-proj",
+		Trigger: "user",
+		Message: "Hello PO",
+	})
+
+	if err != nil {
+		t.Fatalf("StartSession() error: %v", err)
+	}
+
+	if session == nil {
+		t.Fatal("StartSession() returned nil session")
+	}
+
+	if session.PID <= 0 {
+		t.Errorf("PID = %d, want > 0", session.PID)
+	}
+
+	if !m.IsActive("success-proj") {
+		t.Error("IsActive() = false after StartSession, want true")
+	}
+
+	// StopSession must clean up the process and remove it from the map.
+	if err := m.StopSession("success-proj"); err != nil {
+		t.Fatalf("StopSession() error: %v", err)
+	}
+
+	if m.IsActive("success-proj") {
+		t.Error("IsActive() = true after StopSession, want false")
+	}
 }

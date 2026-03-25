@@ -261,11 +261,11 @@ func TestSmoke_FullProjectLifecycle(t *testing.T) {
 		}
 	})
 
-	// 12. Start project (stub — returns 202)
-	t.Run("start project stub", func(t *testing.T) {
+	// 12. Start project (no runtime configured — returns 400)
+	t.Run("start project no runtime", func(t *testing.T) {
 		status := doRequest(t, "POST", ts.URL+"/api/projects/"+projectID+"/start", nil)
-		if status != http.StatusAccepted {
-			t.Fatalf("start project: status %d, want 202", status)
+		if status != http.StatusBadRequest {
+			t.Fatalf("start project: status %d, want 400 (no runtime configured)", status)
 		}
 	})
 

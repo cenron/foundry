@@ -13,6 +13,7 @@ import (
 	"github.com/cenron/foundry/internal/orchestrator"
 	"github.com/cenron/foundry/internal/po"
 	"github.com/cenron/foundry/internal/project"
+	"github.com/cenron/foundry/internal/runtime"
 )
 
 // ServerDeps bundles all dependencies for the API server.
@@ -26,6 +27,8 @@ type ServerDeps struct {
 	Library      *agent.Library
 	RiskProfiles *project.RiskProfileStore
 	PO           *po.SessionManager
+	Runtime      *runtime.LocalRuntime
+	FoundryHome  string
 }
 
 type Server struct {

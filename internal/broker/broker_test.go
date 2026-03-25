@@ -2,6 +2,7 @@ package broker_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -107,5 +108,92 @@ func TestTopicRouting(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatalf("timed out waiting for message %d", i+1)
 		}
+	}
+}
+
+func TestSubscribe_HandlerError_NacksMessage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := context.Background()
+	c, err := broker.Connect(ctx, testRabbitMQURL(t))
+	if err != nil {
+		t.Fatalf("Connect() error: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	callCount := 0
+	handlerErr := fmt.Errorf("handler error")
+
+	// Subscribe with a handler that returns an error.
+	err = c.Subscribe(broker.ExchangeEvents, "events.nack-test.*", "test-nack-queue", func(body []byte) error {
+		callCount++
+		return handlerErr
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error: %v", err)
+	}
+
+	msg := []byte(`{"type":"test"}`)
+	if err := c.Publish(ctx, broker.ExchangeEvents, "events.nack-test.agent", msg); err != nil {
+		t.Fatalf("Publish() error: %v", err)
+	}
+
+	// Give the consumer time to receive and nack the message.
+	time.Sleep(500 * time.Millisecond)
+
+	// The handler should have been called at least once.
+	if callCount == 0 {
+		t.Error("expected handler to be called, got 0 calls")
+	}
+}
+
+func TestClose_DoubleClose(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := context.Background()
+	c, err := broker.Connect(ctx, testRabbitMQURL(t))
+	if err != nil {
+		t.Fatalf("Connect() error: %v", err)
+	}
+
+	// First close should succeed.
+	if err := c.Close(); err != nil {
+		t.Fatalf("first Close() error: %v", err)
+	}
+
+	// Second close on an already-closed connection should not panic.
+	// It may return an error, which is acceptable.
+	_ = c.Close()
+}
+
+func TestPublish_ToAllExchanges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := context.Background()
+	c, err := broker.Connect(ctx, testRabbitMQURL(t))
+	if err != nil {
+		t.Fatalf("Connect() error: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	exchanges := []string{
+		broker.ExchangeEvents,
+		broker.ExchangeLogs,
+		broker.ExchangeCommands,
+	}
+
+	for _, exchange := range exchanges {
+		t.Run(exchange, func(t *testing.T) {
+			err := c.Publish(ctx, exchange, "test.routing.key", []byte(`{"type":"test"}`))
+			if err != nil {
+				t.Errorf("Publish() to exchange %q error: %v", exchange, err)
+			}
+		})
 	}
 }
