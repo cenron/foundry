@@ -121,6 +121,10 @@ func (s *Service) assignTask(ctx context.Context, task *Task, agent AvailableAge
 }
 
 func (s *Service) sendAssignCommand(ctx context.Context, task *Task, agent AvailableAgent) error {
+	return publishAssignCommand(ctx, s.commands, task, agent)
+}
+
+func publishAssignCommand(ctx context.Context, pub CommandPublisher, task *Task, agent AvailableAgent) error {
 	cmd, err := json.Marshal(map[string]string{
 		"type":        "assign_task",
 		"task_id":     task.ID.String(),
@@ -134,7 +138,7 @@ func (s *Service) sendAssignCommand(ctx context.Context, task *Task, agent Avail
 	}
 
 	routingKey := fmt.Sprintf("commands.%s.%s", task.ProjectID.String(), agent.ID.String())
-	return s.commands.Publish(ctx, "foundry.commands", routingKey, cmd)
+	return pub.Publish(ctx, "foundry.commands", routingKey, cmd)
 }
 
 func indexAgentsByRole(agents []AvailableAgent) map[string][]AvailableAgent {

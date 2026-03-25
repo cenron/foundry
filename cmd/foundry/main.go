@@ -27,6 +27,7 @@ import (
 	"github.com/cenron/foundry/internal/config"
 	"github.com/cenron/foundry/internal/database"
 	"github.com/cenron/foundry/internal/orchestrator"
+	"github.com/cenron/foundry/internal/po"
 	"github.com/cenron/foundry/internal/project"
 
 	_ "github.com/cenron/foundry/api/swagger"
@@ -72,6 +73,7 @@ func main() {
 		Tasks:        orchestrator.NewTaskStore(db),
 		Agents:       agent.NewStore(db),
 		RiskProfiles: project.NewRiskProfileStore(db),
+		PO:           po.NewSessionManager(cfg.FoundryHome, cfg.AnthropicAPIKey, cfg.ClaudeVersion),
 	})
 
 	httpServer := &http.Server{

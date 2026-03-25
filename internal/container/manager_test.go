@@ -377,7 +377,7 @@ func TestManager_StreamLogs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StreamLogs() error: %v", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	data, err := io.ReadAll(reader)
 	if err != nil {
