@@ -29,10 +29,17 @@ vi.mock('@/api/generated/@tanstack/react-query.gen', () => ({
   getProjectsByIdAgentsOptions: () => ({ queryKey: ['agents'], queryFn: async () => [] }),
   getProjectsByIdTasksOptions: () => ({ queryKey: ['tasks'], queryFn: async () => [] }),
   getProjectsByIdTasksQueryKey: () => ['tasks'],
+  getProjectsByIdPoStatusOptions: () => ({ queryKey: ['po-status'], queryFn: async () => ({ active: false }) }),
   postProjectsByIdStartMutation: () => ({}),
   postProjectsByIdPauseMutation: () => ({}),
   postProjectsByIdResumeMutation: () => ({}),
   postProjectsByIdAgentsByAgentIdPauseMutation: () => ({}),
+  postProjectsByIdPoChatMutation: () => ({}),
+  deleteProjectsByIdPoChatMutation: () => ({}),
+}))
+
+vi.mock('@/api/generated/sdk.gen', () => ({
+  getProjectsByIdPoStatus: vi.fn(),
 }))
 
 const mockProject: ProjectProject = {

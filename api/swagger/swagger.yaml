@@ -135,6 +135,20 @@ definitions:
       total_tokens:
         type: integer
     type: object
+  api.poChatRequest:
+    properties:
+      message:
+        type: string
+    type: object
+  api.startProjectResponse:
+    properties:
+      agent:
+        $ref: '#/definitions/agent.Agent'
+      status:
+        type: string
+      task:
+        $ref: '#/definitions/orchestrator.Task'
+    type: object
   orchestrator.Task:
     properties:
       assigned_agent_id:
@@ -565,99 +579,7 @@ paths:
       - projects
   /projects/{id}/po/chat:
     delete:
-      description: Stub endpoint — PO session manager not yet implemented
-      parameters:
-      - description: Project ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "400":
-          description: Invalid ID
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-        "501":
-          description: Not implemented
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-      summary: End PO chat (stub)
-      tags:
-      - po
-    post:
-      description: Stub endpoint — PO session manager not yet implemented
-      parameters:
-      - description: Project ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "400":
-          description: Invalid ID
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-        "501":
-          description: Not implemented
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-      summary: PO chat (stub)
-      tags:
-      - po
-  /projects/{id}/po/estimation:
-    post:
-      description: Stub endpoint — PO session manager not yet implemented
-      parameters:
-      - description: Project ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "400":
-          description: Invalid ID
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-        "501":
-          description: Not implemented
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-      summary: PO estimation (stub)
-      tags:
-      - po
-  /projects/{id}/po/planning:
-    post:
-      description: Stub endpoint — PO session manager not yet implemented
-      parameters:
-      - description: Project ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "400":
-          description: Invalid ID
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-        "501":
-          description: Not implemented
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-      summary: PO planning (stub)
-      tags:
-      - po
-  /projects/{id}/po/status:
-    get:
-      description: Stub endpoint — returns inactive status until PO session manager
-        is implemented
+      description: Close the active PO session for the project
       parameters:
       - description: Project ID
         in: path
@@ -676,7 +598,122 @@ paths:
           description: Invalid ID
           schema:
             $ref: '#/definitions/api.ErrorResponse'
-      summary: PO status (stub)
+      summary: End PO chat
+      tags:
+      - po
+    post:
+      consumes:
+      - application/json
+      description: Send a message to the PO agent for the project
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Chat message
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.poChatRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "501":
+          description: Not implemented
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: PO chat
+      tags:
+      - po
+  /projects/{id}/po/estimation:
+    post:
+      description: Launch a PO estimation session for the project
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "501":
+          description: Not implemented
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Start PO estimation
+      tags:
+      - po
+  /projects/{id}/po/planning:
+    post:
+      description: Launch a PO planning session for the project
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "501":
+          description: Not implemented
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Start PO planning
+      tags:
+      - po
+  /projects/{id}/po/status:
+    get:
+      description: Check if a PO session is active for the project
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: PO status
       tags:
       - po
   /projects/{id}/resume:
@@ -915,8 +952,8 @@ paths:
       - specs
   /projects/{id}/start:
     post:
-      description: Initiates project execution (stub — full implementation in Phase
-        6)
+      description: Creates an agent and task, sets up workspace, and launches the
+        claude process
       parameters:
       - description: Project ID
         in: path
@@ -929,11 +966,17 @@ paths:
         "202":
           description: Accepted
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/api.startProjectResponse'
         "400":
-          description: Invalid ID
+          description: Invalid ID or missing runtime
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Project not found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal error
           schema:
             $ref: '#/definitions/api.ErrorResponse'
       summary: Start project

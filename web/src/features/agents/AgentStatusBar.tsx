@@ -17,15 +17,17 @@ function findCurrentTask(tasks: OrchestratorTask[], taskId: string | undefined) 
 }
 
 export function AgentStatusBar({ projectId }: AgentStatusBarProps) {
-  const { data: agents = [] } = useQuery(
-    getProjectsByIdAgentsOptions({ path: { id: projectId } })
-  )
+  const { data: agents } = useQuery({
+    ...getProjectsByIdAgentsOptions({ path: { id: projectId } }),
+    refetchInterval: 5000,
+  })
 
-  const { data: tasks = [] } = useQuery(
-    getProjectsByIdTasksOptions({ path: { id: projectId } })
-  )
+  const { data: tasks } = useQuery({
+    ...getProjectsByIdTasksOptions({ path: { id: projectId } }),
+    refetchInterval: 5000,
+  })
 
-  if (agents.length === 0) {
+  if (!agents || agents.length === 0) {
     return (
       <div className="text-sm text-muted-foreground">No agents running.</div>
     )
@@ -34,7 +36,7 @@ export function AgentStatusBar({ projectId }: AgentStatusBarProps) {
   return (
     <div className="flex flex-wrap gap-2">
       {agents.map((agent) => {
-        const currentTask = findCurrentTask(tasks, agent.current_task_id)
+        const currentTask = findCurrentTask(tasks ?? [], agent.current_task_id)
         return (
           <AgentChip
             key={agent.id}

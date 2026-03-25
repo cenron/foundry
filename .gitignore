@@ -12,6 +12,7 @@ Thumbs.db
 *~
 
 # Go
+/foundry
 /bin/
 /tmp/
 /vendor/
@@ -25,6 +26,13 @@ dist/
 web/build/
 .next/
 *.tsbuildinfo
+
+# Coverage & test reports
+coverage/
+web/coverage/
+playwright-report/
+web/playwright-report/
+.playwright-mcp/
 
 # Generated
 web/src/api/generated/

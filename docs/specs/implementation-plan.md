@@ -2157,6 +2157,220 @@ git commit -m "fix: resolve frontend integration issues from smoke testing"
 
 ---
 
+## Phase 7: Local mode (optional)
+
+> Depends on: Phase 6 complete (full Docker mode working end-to-end)
+> Branch: `phase/local-mode`
+> Note: This phase is optional. Foundry is fully functional after Phase 6 using Docker mode. Local mode removes the Docker requirement by running agents as local processes with folder-based isolation and subscription auth.
+
+### Task 7.1: LocalRuntime implementation
+
+**Files:**
+- Create: `internal/runtime/local.go`
+- Create: `internal/runtime/local_test.go`
+
+- [ ] **Step 1: Write failing tests for LocalRuntime.Setup**
+
+Test that Setup creates the project folder structure: `workspace/`, `worktrees/`, `shared/` (with subdirectories), `state/`. Test that it clones the repo into `workspace/`.
+
+- [ ] **Step 2: Implement LocalRuntime.Setup**
+
+Implements the `Runtime` interface without Docker. Creates the project directory at `<project_dir>/<name>/`, clones the repo, creates `shared/{contracts,designs,context,reviews,messages,status}` and `state/` directories.
+
+- [ ] **Step 3: Write failing tests for LocalRuntime.LaunchAgent**
+
+Test that LaunchAgent creates a git worktree, generates composite CLAUDE.md, spawns `claude -p` with the right flags, and registers the process in `state/agents.json`. Test concurrency limiting — launching beyond `max_concurrent_agents` should block.
+
+- [ ] **Step 4: Implement LocalRuntime.LaunchAgent**
+
+```go
+func (r *LocalRuntime) LaunchAgent(ctx context.Context, opts AgentOpts) (AgentProcess, error) {
+    r.sem <- struct{}{} // acquire concurrency slot
+
+    // Create worktree if needed
+    // Generate composite CLAUDE.md
+    // Spawn agent process
+    cmd := exec.CommandContext(ctx, "claude",
+        "-p", opts.Prompt,
+        "--output-format", "stream-json",
+        "--model", opts.Model,
+        "--max-turns", strconv.Itoa(opts.MaxTurns),
+        "--dangerously-skip-permissions",
+        "--allowedTools", strings.Join(opts.AllowedTools, ","),
+    )
+    cmd.Dir = opts.WorkDir
+    // ...
+}
+```
+
+No `--bare` — local mode uses subscription auth. No `--max-budget-usd` — subscription, not API.
+
+- [ ] **Step 5: Write failing tests for LocalRuntime.WatchEvents**
+
+Test that writing a file to `shared/status/` triggers an event on the channel. Test that writing to `shared/messages/` triggers a message event.
+
+- [ ] **Step 6: Implement LocalRuntime.WatchEvents**
+
+Uses fsnotify to watch `shared/` recursively. Parses JSON files on change, classifies by subdirectory (status → completion event, messages → message event, contracts → artifact event), sends typed events on the channel. No RabbitMQ needed.
+
+- [ ] **Step 7: Implement LocalRuntime.StopAgent and Cleanup**
+
+StopAgent writes `pause-signal` to `state/`, waits for the process to exit (with timeout), then releases the concurrency slot. Cleanup removes the project folder on project completion.
+
+- [ ] **Step 8: Run tests**
+
+```bash
+go test ./internal/runtime/ -v -run TestLocal
+```
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add internal/runtime/local.go internal/runtime/local_test.go
+git commit -m "feat: add LocalRuntime with fsnotify event watching and folder-based isolation"
+```
+
+**Status:** `pending`
+**Branch:** `phase/local-mode`
+
+---
+
+### Task 7.2: Runtime mode configuration
+
+**Files:**
+- Modify: `internal/config/config.go`
+- Modify: `internal/config/config_test.go`
+- Modify: `cmd/foundry/main.go`
+
+- [ ] **Step 1: Add runtime_mode to config**
+
+Add `FOUNDRY_RUNTIME_MODE` env var (values: `docker` (default), `local`). When `local`, RabbitMQ connection is optional.
+
+- [ ] **Step 2: Update composition root**
+
+Initialize the appropriate Runtime (LocalRuntime or DockerRuntime based on config). Skip RabbitMQ connection when in local mode.
+
+- [ ] **Step 3: Run tests**
+
+```bash
+go test ./internal/config/ -v
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add internal/config/ cmd/foundry/main.go
+git commit -m "feat: add runtime mode config with local/docker switching"
+```
+
+**Status:** `pending`
+**Branch:** `phase/local-mode`
+
+---
+
+### Task 7.3: Local mode event router and log streaming
+
+**Files:**
+- Modify: `internal/event/router.go`
+- Create: `internal/event/local_router.go`
+- Create: `internal/event/local_router_test.go`
+
+- [ ] **Step 1: Write failing test for local log streaming**
+
+Test that agent stdout from local processes is captured and forwarded to the WebSocket hub.
+
+- [ ] **Step 2: Implement local event routing**
+
+For local mode, the event router reads stdout from agent processes directly (via `cmd.StdoutPipe()`) instead of subscribing to RabbitMQ. Forwards log lines to WebSocket hub (scoped to agent ID) and batch-persists to Postgres for history.
+
+- [ ] **Step 3: Run tests**
+
+```bash
+go test ./internal/event/ -v -run TestLocal
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add internal/event/
+git commit -m "feat: add local mode event router with stdout-based log streaming"
+```
+
+**Status:** `pending`
+**Branch:** `phase/local-mode`
+
+---
+
+### Task 7.4: Local mode PO sessions
+
+**Files:**
+- Modify: `internal/po/session.go`
+
+- [ ] **Step 1: Update PO session launcher for local mode**
+
+In local mode, PO sessions use subscription auth instead of API keys:
+- Remove `--bare` flag (uses subscription auth)
+- Remove `--max-budget-usd` (subscription, not API)
+- Keep all other flags the same
+
+- [ ] **Step 2: Run tests**
+
+```bash
+go test ./internal/po/ -v
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add internal/po/
+git commit -m "feat: add local mode PO session support with subscription auth"
+```
+
+**Status:** `pending`
+**Branch:** `phase/local-mode`
+
+---
+
+### Task 7.5: Local mode e2e test
+
+**Files:**
+- Create: `tests/e2e/local_smoke_test.go`
+
+- [ ] **Step 1: Write an end-to-end test for local mode**
+
+Test the full lifecycle with `runtime_mode: local`:
+1. Create a project via API
+2. Verify PO local process starts
+3. Simulate PO writing spec and tasks
+4. Approve the spec via API
+5. Start the project via API
+6. Verify project folder is created and agents are spawned as local processes
+7. Simulate a task completion event (write status file to `shared/status/`)
+8. Verify fsnotify picks it up and DAG resolver assigns the next task
+9. Pause an agent, verify clean shutdown
+10. Resume, verify task is reassigned
+
+This test uses Postgres and Redis (from docker-compose). No Docker daemon or RabbitMQ needed.
+
+- [ ] **Step 2: Run the smoke test**
+
+```bash
+make docker-up
+go test ./tests/e2e/ -v -run TestLocalSmoke -timeout 120s
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/e2e/local_smoke_test.go
+git commit -m "test: add local mode end-to-end smoke test"
+```
+
+**Status:** `pending`
+**Branch:** `phase/local-mode`
+
+---
+
 ## Dependency graph
 
 ```mermaid
@@ -2167,17 +2381,18 @@ graph LR
     P3 --> P4[Phase 4<br/>Project API +<br/>PO API<br/>8 tasks]
     P4 --> P5[Phase 5<br/>React UI +<br/>Token Dashboard +<br/>PO Chat<br/>8 tasks]
     P5 --> P6[Phase 6<br/>Integration +<br/>PO Workspace<br/>5 tasks]
+    P6 -.->|optional| P7[Phase 7<br/>Local Mode<br/>5 tasks]
 ```
 
-All phases are sequential. Within each phase, tasks are generally sequential (each builds on the previous), except where noted.
+Phases 0-6 are sequential and deliver a fully working Foundry with Docker mode. Phase 7 is optional and adds local runtime support (folder-based isolation, fsnotify, subscription auth). Within each phase, tasks are generally sequential (each builds on the previous), except where noted.
 
-## Summary of changes from design revisions
+## Summary
 
-This plan incorporates the following design updates:
-
+- **Docker runtime mode** (Phases 0-6): Docker is the primary runtime. Agents run in team containers with RabbitMQ for communication, sidecar for event routing, and API key auth. Phases 0-6 deliver a fully working Foundry.
+- **Local runtime mode** (Phase 7, optional): LocalRuntime implements the same Runtime interface. Agents run as local processes using subscription auth, no Docker or RabbitMQ needed. Folder-based isolation with fsnotify for event detection.
 - **Token optimization** (Phase 3): Model tier resolution, response caching, budget tracking, price table. Risk level drives model selection — low→haiku, medium→sonnet, high→opus.
-- **PO prompt architecture** (Phase 6): PO runs locally as a Claude Code process, not in a container. Stateless sessions with playbook-based behavior. Six playbooks for six session types. Context injected via `--append-system-prompt`.
-- **One container per team** (Phase 2): Single Docker container per project with process supervisor, RabbitMQ sidecar, and git worktrees for branch isolation. Replaces per-agent container model.
-- **Data model updates** (Phase 1): Task gains `model_tier`, `token_usage`, `automation_eligible`. RiskProfile gains `model_routing`. New tables: `risk_profiles`, `spec_mutations`, `agent_messages`.
-- **UI additions** (Phase 5): Token dashboard, model routing settings, PO chat window.
+- **PO prompt architecture** (Phase 6): PO runs as a Claude Code process. Stateless sessions with playbook-based behavior. Six playbooks for six session types. Context injected via `--append-system-prompt`.
+- **One container per team** (Phase 2): Single Docker container per project with process supervisor, RabbitMQ sidecar, and git worktrees for branch isolation.
+- **Data model** (Phase 1): Task has `model_tier`, `token_usage`, `automation_eligible`. RiskProfile has `model_routing`. Tables: `risk_profiles`, `spec_mutations`, `agent_messages`.
+- **UI** (Phase 5): Token dashboard, model routing settings, PO chat window.
 - **PO chat API** (Phase 4): Endpoints for PO chat, planning, estimation, and session management.

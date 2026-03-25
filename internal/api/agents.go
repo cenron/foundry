@@ -1,13 +1,19 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/cenron/foundry/internal/agent"
 	"github.com/cenron/foundry/internal/broker"
+	"github.com/cenron/foundry/internal/orchestrator"
+	"github.com/cenron/foundry/internal/runtime"
 	"github.com/cenron/foundry/internal/shared"
 )
 
@@ -15,6 +21,13 @@ import (
 type agentCommand struct {
 	Action  string `json:"action"`
 	AgentID string `json:"agent_id"`
+}
+
+// startProjectResponse is returned from handleStartProject.
+type startProjectResponse struct {
+	Status string              `json:"status"`
+	Agent  *agent.Agent        `json:"agent"`
+	Task   *orchestrator.Task  `json:"task"`
 }
 
 func (s *Server) registerAgentRoutes(r chi.Router) {
@@ -154,24 +167,144 @@ func (s *Server) publishAgentCommand(w http.ResponseWriter, r *http.Request, act
 	RespondJSON(w, http.StatusAccepted, map[string]string{"status": action})
 }
 
-// handleStartProject stubs the project start operation (full impl in Phase 6).
+// handleStartProject initiates project execution in local mode.
 //
 // @Summary      Start project
-// @Description  Initiates project execution (stub — full implementation in Phase 6)
+// @Description  Creates an agent and task, sets up workspace, and launches the claude process
 // @Tags         projects
 // @Produce      json
 // @Param        id path string true "Project ID"
-// @Success      202 {object} map[string]string
-// @Failure      400 {object} ErrorResponse "Invalid ID"
+// @Success      202 {object} startProjectResponse
+// @Failure      400 {object} ErrorResponse "Invalid ID or missing runtime"
+// @Failure      404 {object} ErrorResponse "Project not found"
+// @Failure      500 {object} ErrorResponse "Internal error"
 // @Router       /projects/{id}/start [post]
 func (s *Server) handleStartProject(w http.ResponseWriter, r *http.Request) {
-	_, err := shared.ParseID(chi.URLParam(r, "id"))
+	projectID, err := shared.ParseID(chi.URLParam(r, "id"))
 	if err != nil {
 		RespondError(w, &shared.ValidationError{Field: "id", Message: "invalid UUID"})
 		return
 	}
 
-	RespondJSON(w, http.StatusAccepted, map[string]string{"status": "starting"})
+	if s.deps.Runtime == nil {
+		RespondError(w, &shared.ValidationError{Field: "runtime", Message: "local runtime not configured"})
+		return
+	}
+
+	// Load and validate the project.
+	proj, err := s.deps.Projects.GetByID(r.Context(), projectID)
+	if err != nil {
+		RespondError(w, err)
+		return
+	}
+
+	if proj.Status != "approved" {
+		RespondError(w, &shared.ValidationError{
+			Field:   "status",
+			Message: fmt.Sprintf("project must be approved before starting, current status: %s", proj.Status),
+		})
+		return
+	}
+
+	// Load the spec for the prompt.
+	spec, err := s.deps.Specs.GetByProjectID(r.Context(), projectID)
+	if err != nil {
+		RespondError(w, err)
+		return
+	}
+
+	// Create the agent record.
+	a, err := s.deps.Agents.Create(r.Context(), agent.CreateAgentParams{
+		ProjectID:   projectID,
+		Role:        "frontend-developer",
+		Provider:    "claude",
+		ContainerID: "local",
+	})
+	if err != nil {
+		RespondError(w, fmt.Errorf("creating agent: %w", err))
+		return
+	}
+
+	// Create the task record.
+	task, err := s.deps.Tasks.Create(r.Context(), orchestrator.CreateTaskParams{
+		ProjectID:    projectID,
+		Title:        "Execute specification",
+		Description:  "Implement the approved specification",
+		AssignedRole: "frontend-developer",
+	})
+	if err != nil {
+		RespondError(w, fmt.Errorf("creating task: %w", err))
+		return
+	}
+
+	// Set up the workspace.
+	projectsBase := filepath.Join(s.deps.FoundryHome, "projects")
+	if err := s.deps.Runtime.Setup(r.Context(), runtime.SetupOpts{
+		ProjectID: projectID.String(),
+		RepoURL:   proj.RepoURL,
+		WorkDir:   s.deps.FoundryHome,
+	}); err != nil {
+		RespondError(w, fmt.Errorf("setting up workspace: %w", err))
+		return
+	}
+
+	// Launch the agent process.
+	agentWorkDir := filepath.Join(projectsBase, projectID.String(), "workspace")
+	agentProcess, err := s.deps.Runtime.LaunchAgent(r.Context(), runtime.AgentOpts{
+		AgentID:   a.ID.String(),
+		ProjectID: projectID.String(),
+		Role:      a.Role,
+		Prompt:    spec.ApprovedContent,
+		WorkDir:   agentWorkDir,
+	})
+	if err != nil {
+		RespondError(w, fmt.Errorf("launching agent: %w", err))
+		return
+	}
+
+	// Mark task as in_progress.
+	if err := s.deps.Tasks.UpdateStatus(r.Context(), task.ID, "in_progress"); err != nil {
+		RespondError(w, fmt.Errorf("updating task status: %w", err))
+		return
+	}
+
+	// Mark project as active.
+	if err := s.deps.Projects.UpdateStatus(r.Context(), projectID, "active"); err != nil {
+		RespondError(w, fmt.Errorf("updating project status: %w", err))
+		return
+	}
+
+	// Reload updated task for response.
+	task.Status = "in_progress"
+
+	// Monitor the agent in the background: when it exits, mark task done and project completed.
+	go s.monitorAgent(agentProcess, projectID.String(), task.ID.String())
+
+	RespondJSON(w, http.StatusAccepted, startProjectResponse{
+		Status: "starting",
+		Agent:  a,
+		Task:   task,
+	})
+}
+
+// monitorAgent polls IsAgentRunning every 3 seconds and, when the agent exits,
+// marks the task done and the project completed.
+func (s *Server) monitorAgent(proc *runtime.AgentProcess, projectID, taskID string) {
+	// Wait for the done signal from the agent process.
+	<-proc.Done
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	taskID2, err := shared.ParseID(taskID)
+	if err == nil {
+		_ = s.deps.Tasks.UpdateStatus(ctx, taskID2, "done")
+	}
+
+	projectID2, err := shared.ParseID(projectID)
+	if err == nil {
+		_ = s.deps.Projects.UpdateStatus(ctx, projectID2, "completed")
+	}
 }
 
 // handlePauseProject pauses all agents for a project.

@@ -254,3 +254,68 @@ func TestMigrateUp_And_Down(t *testing.T) {
 		t.Fatal("test_items table should not exist after migration down")
 	}
 }
+
+func TestMigrateUp_MultipleMigrations(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db, err := database.Connect(context.Background(), testDatabaseURL(t))
+	if err != nil {
+		t.Fatalf("Connect() error: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	dir := t.TempDir()
+
+	// Write two sequential migrations.
+	for _, f := range []struct {
+		name, sql string
+	}{
+		{"991_multi_a.up.sql", "CREATE TABLE IF NOT EXISTS multi_a (id SERIAL PRIMARY KEY);"},
+		{"992_multi_b.up.sql", "CREATE TABLE IF NOT EXISTS multi_b (id SERIAL PRIMARY KEY);"},
+	} {
+		if err := os.WriteFile(filepath.Join(dir, f.name), []byte(f.sql), 0644); err != nil {
+			t.Fatalf("writing %s: %v", f.name, err)
+		}
+	}
+
+	// Clean state.
+	_, _ = db.Exec("DROP TABLE IF EXISTS multi_a, multi_b")
+	_, _ = db.Exec("DELETE FROM schema_migrations WHERE version IN ('991_multi_a','992_multi_b')")
+
+	if err := database.MigrateUp(db, dir); err != nil {
+		t.Fatalf("MigrateUp() error: %v", err)
+	}
+
+	for _, table := range []string{"multi_a", "multi_b"} {
+		var exists bool
+		_ = db.Get(&exists,
+			"SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = $1)", table)
+		if !exists {
+			t.Errorf("expected table %q to exist after migration", table)
+		}
+	}
+
+	// Cleanup.
+	_, _ = db.Exec("DROP TABLE IF EXISTS multi_a, multi_b")
+	_, _ = db.Exec("DELETE FROM schema_migrations WHERE version IN ('991_multi_a','992_multi_b')")
+}
+
+func TestMigrateUp_NonExistentDir(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db, err := database.Connect(context.Background(), testDatabaseURL(t))
+	if err != nil {
+		t.Fatalf("Connect() error: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// Non-existent directory — filepath.Glob returns empty, so MigrateUp is a no-op (not an error).
+	err = database.MigrateUp(db, filepath.Join(t.TempDir(), "does-not-exist"))
+	if err != nil {
+		t.Errorf("MigrateUp() with non-existent dir error: %v", err)
+	}
+}

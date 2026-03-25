@@ -108,13 +108,14 @@ func TestStartProject_InvalidID_Returns400(t *testing.T) {
 	}
 }
 
-func TestStartProject_ValidID_Returns202(t *testing.T) {
+func TestStartProject_NoRuntime_Returns400(t *testing.T) {
 	srv := newTestServer()
 
 	w := doRequest(t, srv, http.MethodPost, "/api/projects/00000000-0000-0000-0000-000000000001/start", "")
 
-	if w.Code != http.StatusAccepted {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusAccepted)
+	// No runtime configured — expects 400 Bad Request.
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 	}
 }
 

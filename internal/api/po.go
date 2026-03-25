@@ -34,6 +34,11 @@ func (s *Server) resolveProjectName(r *http.Request, id shared.ID) (string, erro
 	return proj.Name, nil
 }
 
+// poChatRequest is the request body for the PO chat endpoint.
+type poChatRequest struct {
+	Message string `json:"message"`
+}
+
 // handlePOChat sends a message to the PO and starts/continues a chat session.
 //
 // @Summary      PO chat
@@ -41,7 +46,8 @@ func (s *Server) resolveProjectName(r *http.Request, id shared.ID) (string, erro
 // @Tags         po
 // @Accept       json
 // @Produce      json
-// @Param        id path string true "Project ID"
+// @Param        id   path string       true "Project ID"
+// @Param        body body poChatRequest true "Chat message"
 // @Success      200 {object} map[string]interface{}
 // @Failure      400 {object} ErrorResponse "Invalid ID"
 // @Failure      501 {object} ErrorResponse "Not implemented"
@@ -60,9 +66,7 @@ func (s *Server) handlePOChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Message string `json:"message"`
-	}
+	var req poChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		RespondError(w, &shared.ValidationError{Field: "body", Message: "invalid JSON"})
 		return

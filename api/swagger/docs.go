@@ -498,14 +498,17 @@ const docTemplate = `{
         },
         "/projects/{id}/po/chat": {
             "post": {
-                "description": "Stub endpoint — PO session manager not yet implemented",
+                "description": "Send a message to the PO agent for the project",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "po"
                 ],
-                "summary": "PO chat (stub)",
+                "summary": "PO chat",
                 "parameters": [
                     {
                         "type": "string",
@@ -513,9 +516,25 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "description": "Chat message",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.poChatRequest"
+                        }
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "400": {
                         "description": "Invalid ID",
                         "schema": {
@@ -531,14 +550,14 @@ const docTemplate = `{
                 }
             },
             "delete": {
-                "description": "Stub endpoint — PO session manager not yet implemented",
+                "description": "Close the active PO session for the project",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "po"
                 ],
-                "summary": "End PO chat (stub)",
+                "summary": "End PO chat",
                 "parameters": [
                     {
                         "type": "string",
@@ -549,14 +568,15 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
-                    "400": {
-                        "description": "Invalid ID",
+                    "200": {
+                        "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     },
-                    "501": {
-                        "description": "Not implemented",
+                    "400": {
+                        "description": "Invalid ID",
                         "schema": {
                             "$ref": "#/definitions/api.ErrorResponse"
                         }
@@ -566,14 +586,14 @@ const docTemplate = `{
         },
         "/projects/{id}/po/estimation": {
             "post": {
-                "description": "Stub endpoint — PO session manager not yet implemented",
+                "description": "Launch a PO estimation session for the project",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "po"
                 ],
-                "summary": "PO estimation (stub)",
+                "summary": "Start PO estimation",
                 "parameters": [
                     {
                         "type": "string",
@@ -584,6 +604,13 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "400": {
                         "description": "Invalid ID",
                         "schema": {
@@ -601,14 +628,14 @@ const docTemplate = `{
         },
         "/projects/{id}/po/planning": {
             "post": {
-                "description": "Stub endpoint — PO session manager not yet implemented",
+                "description": "Launch a PO planning session for the project",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "po"
                 ],
-                "summary": "PO planning (stub)",
+                "summary": "Start PO planning",
                 "parameters": [
                     {
                         "type": "string",
@@ -619,6 +646,13 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "400": {
                         "description": "Invalid ID",
                         "schema": {
@@ -636,14 +670,14 @@ const docTemplate = `{
         },
         "/projects/{id}/po/status": {
             "get": {
-                "description": "Stub endpoint — returns inactive status until PO session manager is implemented",
+                "description": "Check if a PO session is active for the project",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "po"
                 ],
-                "summary": "PO status (stub)",
+                "summary": "PO status",
                 "parameters": [
                     {
                         "type": "string",
@@ -1018,7 +1052,7 @@ const docTemplate = `{
         },
         "/projects/{id}/start": {
             "post": {
-                "description": "Initiates project execution (stub — full implementation in Phase 6)",
+                "description": "Creates an agent and task, sets up workspace, and launches the claude process",
                 "produces": [
                     "application/json"
                 ],
@@ -1039,14 +1073,23 @@ const docTemplate = `{
                     "202": {
                         "description": "Accepted",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/api.startProjectResponse"
                         }
                     },
                     "400": {
-                        "description": "Invalid ID",
+                        "description": "Invalid ID or missing runtime",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Project not found",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
                         "schema": {
                             "$ref": "#/definitions/api.ErrorResponse"
                         }
@@ -1402,6 +1445,28 @@ const docTemplate = `{
                 },
                 "total_tokens": {
                     "type": "integer"
+                }
+            }
+        },
+        "api.poChatRequest": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.startProjectResponse": {
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "$ref": "#/definitions/agent.Agent"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "task": {
+                    "$ref": "#/definitions/orchestrator.Task"
                 }
             }
         },

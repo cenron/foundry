@@ -30,6 +30,7 @@ import (
 	"github.com/cenron/foundry/internal/orchestrator"
 	"github.com/cenron/foundry/internal/po"
 	"github.com/cenron/foundry/internal/project"
+	"github.com/cenron/foundry/internal/runtime"
 
 	_ "github.com/cenron/foundry/api/swagger"
 )
@@ -54,13 +55,6 @@ func main() {
 	defer func() { _ = cacheClient.Close() }()
 	log.Println("connected to redis")
 
-	brokerClient, err := broker.Connect(ctx, cfg.RabbitMQURL)
-	if err != nil {
-		log.Fatalf("broker: %v", err)
-	}
-	defer func() { _ = brokerClient.Close() }()
-	log.Println("connected to rabbitmq")
-
 	if err := database.MigrateUp(db, "migrations"); err != nil {
 		log.Fatalf("migrations: %v", err)
 	}
@@ -71,23 +65,56 @@ func main() {
 		log.Printf("agent library: %v (continuing without library)", err)
 	}
 
-	srv := api.NewServer(api.ServerDeps{
+	// Extract embedded PO workspace (CLAUDE.md + playbooks) to foundry home.
+	if err := po.DeployPOWorkspace(cfg.FoundryHome); err != nil {
+		log.Printf("deploying PO workspace: %v (PO sessions may lack playbooks)", err)
+	} else {
+		log.Println("PO workspace deployed")
+	}
+
+	poManager := po.NewSessionManager(cfg.FoundryHome, cfg.AnthropicAPIKey, cfg.ClaudeVersion)
+
+	deps := api.ServerDeps{
 		Cache:        cacheClient,
-		Broker:       brokerClient,
 		Projects:     project.NewStore(db),
 		Specs:        project.NewSpecStore(db),
 		Tasks:        orchestrator.NewTaskStore(db),
 		Agents:       agent.NewStore(db),
 		Library:      lib,
 		RiskProfiles: project.NewRiskProfileStore(db),
-		PO:           po.NewSessionManager(cfg.FoundryHome, cfg.AnthropicAPIKey, cfg.ClaudeVersion),
-	})
-
-	eventStore := event.NewStore(db)
-	eventRouter := event.NewRouter(eventStore, srv.Hub(), cacheClient, brokerClient)
-	if err := eventRouter.Start(); err != nil {
-		log.Printf("event router: %v", err)
+		PO:           poManager,
+		FoundryHome:  cfg.FoundryHome,
 	}
+
+	var brokerClient *broker.Client
+
+	if cfg.IsLocalMode() {
+		log.Println("local mode: skipping RabbitMQ, using local runtime")
+		deps.Runtime = runtime.NewLocalRuntime(cfg.MaxConcurrentAgents)
+		poManager = po.NewLocalSessionManager(cfg.FoundryHome, cfg.ClaudeVersion)
+		deps.PO = poManager
+	} else {
+		brokerClient, err = broker.Connect(ctx, cfg.RabbitMQURL)
+		if err != nil {
+			log.Fatalf("broker: %v", err)
+		}
+		defer func() { _ = brokerClient.Close() }()
+		log.Println("connected to rabbitmq")
+		deps.Broker = brokerClient
+	}
+
+	srv := api.NewServer(deps)
+
+	// Event router — only in Docker mode (needs broker for subscriptions).
+	if brokerClient != nil {
+		eventStore := event.NewStore(db)
+		eventRouter := event.NewRouter(eventStore, srv.Hub(), cacheClient, brokerClient)
+		if err := eventRouter.Start(); err != nil {
+			log.Printf("event router: %v", err)
+		}
+	}
+
+	log.Printf("runtime mode: %s", cfg.RuntimeMode)
 
 	httpServer := &http.Server{
 		Addr:         ":" + cfg.APIPort,
@@ -110,6 +137,9 @@ func main() {
 
 	<-done
 	log.Println("shutting down...")
+
+	// Stop PO sessions before HTTP server — prevents orphaned child processes.
+	poManager.StopAll()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

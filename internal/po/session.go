@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"sync"
@@ -58,9 +59,9 @@ type POSession struct {
 
 // sessionTierConfig holds the model tier and behavioral flags for a session type.
 type sessionTierConfig struct {
-	model          string
-	maxTurns       int
-	maxBudgetUSD   float64 // 0 means no budget limit
+	model           string
+	maxTurns        int
+	maxBudgetUSD    float64 // 0 means no budget limit
 	systemTriggered bool
 }
 
@@ -106,6 +107,7 @@ type SessionManager struct {
 	foundryHome   string
 	apiKey        string
 	claudeVersion string
+	localMode     bool
 	mu            sync.Mutex
 	sessions      map[string]*POSession // projectName -> active session
 }
@@ -116,6 +118,17 @@ func NewSessionManager(foundryHome, apiKey, claudeVersion string) *SessionManage
 		foundryHome:   foundryHome,
 		apiKey:        apiKey,
 		claudeVersion: claudeVersion,
+		sessions:      make(map[string]*POSession),
+	}
+}
+
+// NewLocalSessionManager creates a SessionManager configured for local mode.
+// In local mode: --bare and --max-budget-usd are omitted, ANTHROPIC_API_KEY is not injected.
+func NewLocalSessionManager(foundryHome, claudeVersion string) *SessionManager {
+	return &SessionManager{
+		foundryHome:   foundryHome,
+		claudeVersion: claudeVersion,
+		localMode:     true,
 		sessions:      make(map[string]*POSession),
 	}
 }
@@ -211,6 +224,22 @@ func (m *SessionManager) StopSession(projectName string) error {
 	return nil
 }
 
+// StopAll stops all active PO sessions. Used during graceful shutdown.
+func (m *SessionManager) StopAll() {
+	m.mu.Lock()
+	projectNames := make([]string, 0, len(m.sessions))
+	for name := range m.sessions {
+		projectNames = append(projectNames, name)
+	}
+	m.mu.Unlock()
+
+	for _, name := range projectNames {
+		if err := m.StopSession(name); err != nil {
+			log.Printf("stopping PO session %q: %v", name, err)
+		}
+	}
+}
+
 // GetSession returns the active session for a project, or nil if none exists.
 func (m *SessionManager) GetSession(projectName string) *POSession {
 	m.mu.Lock()
@@ -234,16 +263,20 @@ func (m *SessionManager) BuildCommand(ctx context.Context, opts POSessionOpts) *
 
 	args := []string{
 		"--output-format", "stream-json",
+		"--verbose", // required when using -p with stream-json
 		"--model", tier.model,
 		"--max-turns", fmt.Sprintf("%d", tier.maxTurns),
 	}
 
-	if tier.maxBudgetUSD > 0 {
+	if !m.localMode && tier.maxBudgetUSD > 0 {
 		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", tier.maxBudgetUSD))
 	}
 
 	if tier.systemTriggered {
-		args = append(args, "--bare", "--dangerously-skip-permissions")
+		if !m.localMode {
+			args = append(args, "--bare")
+		}
+		args = append(args, "--dangerously-skip-permissions")
 	}
 
 	args = append(args, "--append-system-prompt", sessionCtx)
@@ -251,7 +284,10 @@ func (m *SessionManager) BuildCommand(ctx context.Context, opts POSessionOpts) *
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Dir = m.foundryHome
-	cmd.Env = append(cmd.Environ(), "ANTHROPIC_API_KEY="+m.apiKey)
+
+	if !m.localMode {
+		cmd.Env = append(cmd.Environ(), "ANTHROPIC_API_KEY="+m.apiKey)
+	}
 
 	return cmd
 }
