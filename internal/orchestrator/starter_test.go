@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/cenron/foundry/internal/agent"
@@ -273,6 +274,144 @@ func TestProjectStarter_RejectsPlanningStatus(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestProjectStarter_ContainerCreateFailure verifies that a container creation
+// error is propagated and StartProject aborts before creating agents.
+func TestProjectStarter_ContainerCreateFailure(t *testing.T) {
+	projects := newMockProjectReader()
+	agents := &mockAgentCreator{}
+	containers := &failingContainerCreator{err: fmt.Errorf("docker unavailable")}
+	taskCreator := &mockTaskCreator{}
+	store := newMockTaskStateStore()
+	pub := &recordingPublisher{}
+	sm := orchestrator.NewStateMachine(store, pub)
+	unblocker := &mockUnblockedFinder{}
+
+	starter := orchestrator.NewProjectStarter(
+		projects, agents, taskCreator, unblocker, sm, containers, pub,
+		func(_, _ string) string { return "sonnet" },
+	)
+
+	p := projects.addProject("approved")
+	params := makeStartParams(p.ID)
+
+	err := starter.StartProject(context.Background(), params)
+	if err == nil {
+		t.Fatal("expected error when container creation fails, got nil")
+	}
+
+	if len(agents.created) != 0 {
+		t.Errorf("expected no agents created after container failure, got %d", len(agents.created))
+	}
+}
+
+// TestProjectStarter_AgentCreateFailure verifies that an agent creation
+// error is propagated cleanly.
+func TestProjectStarter_AgentCreateFailure(t *testing.T) {
+	projects := newMockProjectReader()
+	agents := &failingAgentCreator{err: fmt.Errorf("agent DB error")}
+	containers := &mockContainerCreator{}
+	taskCreator := &mockTaskCreator{}
+	store := newMockTaskStateStore()
+	pub := &recordingPublisher{}
+	sm := orchestrator.NewStateMachine(store, pub)
+	unblocker := &mockUnblockedFinder{}
+
+	starter := orchestrator.NewProjectStarter(
+		projects, agents, taskCreator, unblocker, sm, containers, pub,
+		func(_, _ string) string { return "sonnet" },
+	)
+
+	p := projects.addProject("approved")
+	params := makeStartParams(p.ID)
+
+	err := starter.StartProject(context.Background(), params)
+	if err == nil {
+		t.Fatal("expected error when agent creation fails, got nil")
+	}
+}
+
+// TestProjectStarter_AssignInitialTasks_WithMatchingAgent exercises the
+// assignTask code path inside assignInitialTasks when a matching agent exists.
+func TestProjectStarter_AssignInitialTasks_WithMatchingAgent(t *testing.T) {
+	projects := newMockProjectReader()
+	agents := &mockAgentCreator{}
+	containers := &mockContainerCreator{}
+	taskCreator := &mockTaskCreator{}
+	store := newMockTaskStateStore()
+	pub := &recordingPublisher{}
+	sm := orchestrator.NewStateMachine(store, pub)
+	unblocker := &mockUnblockedFinder{}
+
+	starter := orchestrator.NewProjectStarter(
+		projects, agents, taskCreator, unblocker, sm, containers, pub,
+		func(_, _ string) string { return "sonnet" },
+	)
+
+	p := projects.addProject("approved")
+	params := orchestrator.StartProjectParams{
+		ProjectID:   p.ID,
+		FoundryHome: "/foundry",
+		Config: orchestrator.StartConfig{
+			Roles:    []string{"backend-developer"},
+			Provider: "claude",
+			Tasks: []orchestrator.TaskDef{
+				{
+					Title:        "Task X",
+					Description:  "do X",
+					RiskLevel:    "low",
+					AssignedRole: "backend-developer",
+				},
+			},
+		},
+	}
+
+	// Inject an unblocked task whose role matches the agent that will be
+	// created. The unblocker is queried after agents and tasks are created,
+	// so we populate it with a pre-seeded task in the state store.
+	placeholderTask := &orchestrator.Task{
+		ID:           shared.NewID(),
+		ProjectID:    p.ID,
+		Title:        "Task X",
+		AssignedRole: "backend-developer",
+		Status:       "pending",
+	}
+	store.tasks[placeholderTask.ID] = placeholderTask
+	unblocker.tasks = []orchestrator.Task{*placeholderTask}
+
+	if err := starter.StartProject(context.Background(), params); err != nil {
+		t.Fatalf("StartProject() error: %v", err)
+	}
+
+	// The assign command should have been published for the matched role.
+	pub.mu.Lock()
+	defer pub.mu.Unlock()
+	if !hasCommandOfType(pub.messages, "assign_task") {
+		t.Error("expected assign_task command to be published")
+	}
+}
+
+// --- failure mocks ---
+
+type failingContainerCreator struct {
+	err error
+}
+
+func (m *failingContainerCreator) CreateTeam(_ context.Context, _ container.TeamContainerConfig) (string, error) {
+	return "", m.err
+}
+
+func (m *failingContainerCreator) StartTeam(_ context.Context, _ string) error {
+	return m.err
+}
+
+type failingAgentCreator struct {
+	err error
+}
+
+func (m *failingAgentCreator) Create(_ context.Context, _ agent.CreateAgentParams) (*agent.Agent, error) {
+	return nil, m.err
 }
 
 // isValidationError checks if err is (or wraps) a *shared.ValidationError.

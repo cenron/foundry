@@ -155,6 +155,35 @@ func TestScaffoldProjectWorkspace_EmptyTechStack(t *testing.T) {
 	}
 }
 
+func TestScaffoldProjectWorkspace_Idempotent(t *testing.T) {
+	foundryHome := t.TempDir()
+	projectName := "idempotent-project"
+	repoURL := "https://github.com/acme/idempotent"
+	techStack := []string{"go"}
+
+	// First call creates the workspace.
+	if err := po.ScaffoldProjectWorkspace(foundryHome, projectName, repoURL, techStack); err != nil {
+		t.Fatalf("first ScaffoldProjectWorkspace() error: %v", err)
+	}
+
+	// Second call with the same args should succeed without error (MkdirAll is idempotent).
+	if err := po.ScaffoldProjectWorkspace(foundryHome, projectName, repoURL, techStack); err != nil {
+		t.Fatalf("second ScaffoldProjectWorkspace() error: %v", err)
+	}
+
+	// Verify the workspace still has the expected structure.
+	projectDir := filepath.Join(foundryHome, "projects", projectName)
+	for _, dir := range []string{projectDir,
+		filepath.Join(projectDir, "memory"),
+		filepath.Join(projectDir, "decisions"),
+		filepath.Join(projectDir, "artifacts"),
+	} {
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			t.Errorf("expected directory %q to exist after idempotent call", dir)
+		}
+	}
+}
+
 // --- buildCommand arg verification ---
 
 func TestSessionManager_BuildCommand_Planning(t *testing.T) {
