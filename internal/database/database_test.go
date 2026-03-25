@@ -38,6 +38,79 @@ func TestConnect(t *testing.T) {
 	}
 }
 
+func TestConnect_InvalidURL(t *testing.T) {
+	_, err := database.Connect(context.Background(), "not-a-valid-url")
+	if err == nil {
+		t.Fatal("expected error for invalid DB URL, got nil")
+	}
+}
+
+func TestMigrateDown_EmptyDir(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db, err := database.Connect(context.Background(), testDatabaseURL(t))
+	if err != nil {
+		t.Fatalf("Connect() error: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	dir := t.TempDir() // empty dir — no migrations found
+
+	// Should return nil without error when no down migrations exist.
+	if err := database.MigrateDown(db, dir); err != nil {
+		t.Fatalf("MigrateDown() with empty dir error: %v", err)
+	}
+}
+
+func TestMigrateDown_VersionNotApplied(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db, err := database.Connect(context.Background(), testDatabaseURL(t))
+	if err != nil {
+		t.Fatalf("Connect() error: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	dir := t.TempDir()
+	downSQL := `-- no-op rollback`
+	_ = os.WriteFile(filepath.Join(dir, "998_not_applied.down.sql"), []byte(downSQL), 0644)
+
+	// Version 998_not_applied was never applied — MigrateDown should be a no-op.
+	_, _ = db.Exec("DELETE FROM schema_migrations WHERE version = '998_not_applied'")
+
+	if err := database.MigrateDown(db, dir); err != nil {
+		t.Fatalf("MigrateDown() for unapplied version error: %v", err)
+	}
+}
+
+func TestMigrateUp_InvalidSQL_ReturnsError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db, err := database.Connect(context.Background(), testDatabaseURL(t))
+	if err != nil {
+		t.Fatalf("Connect() error: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	dir := t.TempDir()
+	invalidSQL := `THIS IS NOT VALID SQL;`
+	_ = os.WriteFile(filepath.Join(dir, "997_bad.up.sql"), []byte(invalidSQL), 0644)
+	_, _ = db.Exec("DELETE FROM schema_migrations WHERE version = '997_bad'")
+
+	if err := database.MigrateUp(db, dir); err == nil {
+		t.Fatal("expected error for invalid SQL migration, got nil")
+	}
+
+	// Cleanup in case migration partially applied.
+	_, _ = db.Exec("DELETE FROM schema_migrations WHERE version = '997_bad'")
+}
+
 func TestMigrateUp_And_Down(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")

@@ -7,6 +7,7 @@ import (
 
 	"github.com/cenron/foundry/internal/database"
 	"github.com/cenron/foundry/internal/project"
+	"github.com/cenron/foundry/internal/shared"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -27,6 +28,7 @@ func setupTestDB(t *testing.T) *sqlx.DB {
 	}
 
 	t.Cleanup(func() {
+		_, _ = db.Exec("DELETE FROM risk_profiles WHERE project_id IS NOT NULL")
 		_, _ = db.Exec("DELETE FROM specs")
 		_, _ = db.Exec("DELETE FROM projects")
 		_ = db.Close()
@@ -198,5 +200,198 @@ func TestSpecStore_UpdateApproval(t *testing.T) {
 	}
 	if got.ApprovedAt == nil {
 		t.Error("ApprovedAt should be set after approval")
+	}
+}
+
+func TestProjectStore_GetByID_NotFound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db := setupTestDB(t)
+	store := project.NewStore(db)
+
+	_, err := store.GetByID(context.Background(), shared.NewID())
+	if err == nil {
+		t.Fatal("expected not found error, got nil")
+	}
+}
+
+func TestSpecStore_GetByProjectID_NotFound(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db := setupTestDB(t)
+	projectStore := project.NewStore(db)
+	specStore := project.NewSpecStore(db)
+
+	p, _ := projectStore.Create(context.Background(), project.CreateProjectParams{Name: "No Spec"})
+
+	_, err := specStore.GetByProjectID(context.Background(), p.ID)
+	if err == nil {
+		t.Fatal("expected not found error for project with no spec, got nil")
+	}
+}
+
+func TestProjectStore_Update(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db := setupTestDB(t)
+	store := project.NewStore(db)
+
+	p, _ := store.Create(context.Background(), project.CreateProjectParams{
+		Name:        "Original Name",
+		Description: "Original description",
+	})
+
+	updated, err := store.Update(context.Background(), p.ID, "New Name", "New description")
+	if err != nil {
+		t.Fatalf("Update() error: %v", err)
+	}
+
+	if updated.Name != "New Name" {
+		t.Errorf("Name = %q, want %q", updated.Name, "New Name")
+	}
+	if updated.Description != "New description" {
+		t.Errorf("Description = %q, want %q", updated.Description, "New description")
+	}
+	if updated.ID != p.ID {
+		t.Errorf("ID changed after update")
+	}
+}
+
+func TestRiskProfileStore_GetByProjectID_FallsBackToGlobal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db := setupTestDB(t)
+	projectStore := project.NewStore(db)
+	riskStore := project.NewRiskProfileStore(db)
+
+	p, _ := projectStore.Create(context.Background(), project.CreateProjectParams{Name: "Risk Test"})
+
+	// No project-specific profile — should return the global default seeded by migrations.
+	profile, err := riskStore.GetByProjectID(context.Background(), p.ID)
+	if err != nil {
+		t.Fatalf("GetByProjectID() error: %v", err)
+	}
+
+	if profile.ProjectID != nil {
+		t.Errorf("expected global default (ProjectID nil), got project-specific")
+	}
+	if profile.Name == "" {
+		t.Error("expected non-empty name on global default profile")
+	}
+}
+
+func TestRiskProfileStore_Create(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db := setupTestDB(t)
+	projectStore := project.NewStore(db)
+	riskStore := project.NewRiskProfileStore(db)
+
+	p, _ := projectStore.Create(context.Background(), project.CreateProjectParams{Name: "Risk Create Test"})
+
+	params := project.UpdateRiskProfileParams{
+		Name:           "Custom Profile",
+		LowCriteria:    []byte(`{"keywords":["docs"]}`),
+		MediumCriteria: []byte(`{"keywords":["feature"]}`),
+		HighCriteria:   []byte(`{"keywords":["auth"]}`),
+		ModelRouting:   []byte(`{"claude":{"low":"haiku","medium":"sonnet","high":"opus"}}`),
+	}
+
+	profile, err := riskStore.Create(context.Background(), p.ID, params)
+	if err != nil {
+		t.Fatalf("Create() error: %v", err)
+	}
+
+	if profile.Name != "Custom Profile" {
+		t.Errorf("Name = %q, want %q", profile.Name, "Custom Profile")
+	}
+	if profile.ProjectID == nil || *profile.ProjectID != p.ID {
+		t.Errorf("ProjectID = %v, want %v", profile.ProjectID, p.ID)
+	}
+}
+
+func TestRiskProfileStore_GetByProjectID_ReturnsProjectSpecific(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db := setupTestDB(t)
+	projectStore := project.NewStore(db)
+	riskStore := project.NewRiskProfileStore(db)
+
+	p, _ := projectStore.Create(context.Background(), project.CreateProjectParams{Name: "Risk Specific Test"})
+
+	params := project.UpdateRiskProfileParams{
+		Name:           "Project-Specific",
+		LowCriteria:    []byte(`{}`),
+		MediumCriteria: []byte(`{}`),
+		HighCriteria:   []byte(`{}`),
+		ModelRouting:   []byte(`{}`),
+	}
+	_, _ = riskStore.Create(context.Background(), p.ID, params)
+
+	profile, err := riskStore.GetByProjectID(context.Background(), p.ID)
+	if err != nil {
+		t.Fatalf("GetByProjectID() error: %v", err)
+	}
+
+	if profile.ProjectID == nil {
+		t.Fatal("expected project-specific profile, got global default")
+	}
+	if *profile.ProjectID != p.ID {
+		t.Errorf("ProjectID = %v, want %v", *profile.ProjectID, p.ID)
+	}
+	if profile.Name != "Project-Specific" {
+		t.Errorf("Name = %q, want %q", profile.Name, "Project-Specific")
+	}
+}
+
+func TestRiskProfileStore_Update(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db := setupTestDB(t)
+	projectStore := project.NewStore(db)
+	riskStore := project.NewRiskProfileStore(db)
+
+	p, _ := projectStore.Create(context.Background(), project.CreateProjectParams{Name: "Risk Update Test"})
+
+	createParams := project.UpdateRiskProfileParams{
+		Name:           "Original",
+		LowCriteria:    []byte(`{}`),
+		MediumCriteria: []byte(`{}`),
+		HighCriteria:   []byte(`{}`),
+		ModelRouting:   []byte(`{}`),
+	}
+	created, _ := riskStore.Create(context.Background(), p.ID, createParams)
+
+	updateParams := project.UpdateRiskProfileParams{
+		Name:           "Updated Name",
+		LowCriteria:    []byte(`{"updated":true}`),
+		MediumCriteria: []byte(`{"updated":true}`),
+		HighCriteria:   []byte(`{"updated":true}`),
+		ModelRouting:   []byte(`{"updated":true}`),
+	}
+	updated, err := riskStore.Update(context.Background(), created.ID, updateParams)
+	if err != nil {
+		t.Fatalf("Update() error: %v", err)
+	}
+
+	if updated.Name != "Updated Name" {
+		t.Errorf("Name = %q, want %q", updated.Name, "Updated Name")
+	}
+	if updated.ID != created.ID {
+		t.Errorf("ID changed after update")
 	}
 }

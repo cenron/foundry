@@ -8,6 +8,7 @@ import (
 	"github.com/cenron/foundry/internal/agent"
 	"github.com/cenron/foundry/internal/database"
 	"github.com/cenron/foundry/internal/event"
+	"github.com/cenron/foundry/internal/orchestrator"
 	"github.com/cenron/foundry/internal/project"
 	"github.com/cenron/foundry/internal/shared"
 	"github.com/jmoiron/sqlx"
@@ -32,6 +33,7 @@ func setupTestDB(t *testing.T) *sqlx.DB {
 	t.Cleanup(func() {
 		_, _ = db.Exec("DELETE FROM artifacts")
 		_, _ = db.Exec("DELETE FROM events")
+		_, _ = db.Exec("DELETE FROM tasks")
 		_, _ = db.Exec("DELETE FROM agents")
 		_, _ = db.Exec("DELETE FROM projects")
 		_ = db.Close()
@@ -177,4 +179,60 @@ func TestArtifactStore_CreateAndList(t *testing.T) {
 
 	// Suppress unused variable
 	_ = shared.NewID()
+}
+
+func TestArtifactStore_ListByTask(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db := setupTestDB(t)
+	artifactStore := event.NewArtifactStore(db)
+	f := createFixtures(t, db)
+
+	// Create a task to associate artifacts with.
+	taskStore := orchestrator.NewTaskStore(db)
+	task, err := taskStore.Create(context.Background(), orchestrator.CreateTaskParams{
+		ProjectID: f.project.ID,
+		Title:     "Artifact task",
+	})
+	if err != nil {
+		t.Fatalf("creating task: %v", err)
+	}
+
+	agentID := f.agent.ID
+
+	// Artifact belonging to the task.
+	_, err = artifactStore.Create(context.Background(), event.CreateArtifactParams{
+		ProjectID:   f.project.ID,
+		TaskID:      &task.ID,
+		AgentID:     &agentID,
+		Type:        "code",
+		Path:        "/src/main.go",
+		Description: "Main entrypoint",
+	})
+	if err != nil {
+		t.Fatalf("Create() error: %v", err)
+	}
+
+	// Artifact with no task (should not appear in the task-scoped query).
+	_, _ = artifactStore.Create(context.Background(), event.CreateArtifactParams{
+		ProjectID:   f.project.ID,
+		AgentID:     &agentID,
+		Type:        "docs",
+		Path:        "/docs/readme.md",
+		Description: "README",
+	})
+
+	artifacts, err := artifactStore.ListByTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("ListByTask() error: %v", err)
+	}
+
+	if len(artifacts) != 1 {
+		t.Errorf("len = %d, want 1", len(artifacts))
+	}
+	if len(artifacts) > 0 && artifacts[0].Path != "/src/main.go" {
+		t.Errorf("Path = %q, want %q", artifacts[0].Path, "/src/main.go")
+	}
 }

@@ -31,6 +31,13 @@ func TestConnect(t *testing.T) {
 	defer func() { _ = c.Close() }()
 }
 
+func TestConnect_InvalidURL(t *testing.T) {
+	_, err := broker.Connect(context.Background(), "amqp://bad:bad@localhost:1/")
+	if err == nil {
+		t.Fatal("expected error for bad RabbitMQ URL, got nil")
+	}
+}
+
 func TestPublishSubscribe(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")

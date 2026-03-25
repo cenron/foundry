@@ -153,3 +153,125 @@ func TestRouter_HandleEvent_InvalidJSON(t *testing.T) {
 		t.Fatal("should ack bad messages without error")
 	}
 }
+
+func TestRouter_HandleEvent_PersistsToStore(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db := setupTestDB(t)
+	store := event.NewStore(db)
+	f := createFixtures(t, db)
+
+	hub := &mockBroadcaster{}
+	cache := newMockCache()
+	sub := newMockSubscriber()
+
+	router := event.NewRouter(store, hub, cache, sub)
+	_ = router.Start()
+
+	evt := map[string]interface{}{
+		"project_id": f.project.ID.String(),
+		"agent_id":   f.agent.ID.String(),
+		"type":       "task_started",
+		"payload":    map[string]string{"info": "starting"},
+	}
+	body, _ := json.Marshal(evt)
+
+	handler := sub.handlers["events.#"]
+	if err := handler(body); err != nil {
+		t.Fatalf("handleEvent error: %v", err)
+	}
+
+	// Verify the event was persisted to the database.
+	events, _, err := store.ListByProject(context.Background(), f.project.ID, 1, 10)
+	if err != nil {
+		t.Fatalf("ListByProject() error: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 persisted event, got %d", len(events))
+	}
+	if events[0].Type != "task_started" {
+		t.Errorf("Type = %q, want %q", events[0].Type, "task_started")
+	}
+}
+
+func TestRouter_HandleEvent_PersistSkipsInvalidProjectID(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	db := setupTestDB(t)
+	store := event.NewStore(db)
+
+	hub := &mockBroadcaster{}
+	cache := newMockCache()
+	sub := newMockSubscriber()
+
+	router := event.NewRouter(store, hub, cache, sub)
+	_ = router.Start()
+
+	// Event with an invalid project_id — persist should log and skip, not return error.
+	evt := map[string]interface{}{
+		"project_id": "not-a-uuid",
+		"type":       "task_started",
+	}
+	body, _ := json.Marshal(evt)
+
+	handler := sub.handlers["events.#"]
+	if err := handler(body); err != nil {
+		t.Fatalf("handleEvent should not error on bad project_id, got: %v", err)
+	}
+}
+
+func TestRouter_HandleEvent_NilCacheSkipped(t *testing.T) {
+	hub := &mockBroadcaster{}
+	sub := newMockSubscriber()
+
+	// Nil cache — updateCache should be a no-op without panicking.
+	router := event.NewRouter(nil, hub, nil, sub)
+	_ = router.Start()
+
+	evt := map[string]interface{}{
+		"project_id": "00000000-0000-0000-0000-000000000001",
+		"type":       "agent_ready",
+	}
+	body, _ := json.Marshal(evt)
+
+	handler := sub.handlers["events.#"]
+	if err := handler(body); err != nil {
+		t.Fatalf("handleEvent error: %v", err)
+	}
+
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+	if len(hub.messages) != 1 {
+		t.Errorf("expected broadcast even with nil cache, got %d messages", len(hub.messages))
+	}
+}
+
+func TestRouter_HandleEvent_MissingProjectIDSkipsCacheUpdate(t *testing.T) {
+	hub := &mockBroadcaster{}
+	cache := newMockCache()
+	sub := newMockSubscriber()
+
+	router := event.NewRouter(nil, hub, cache, sub)
+	_ = router.Start()
+
+	// Event without project_id — cache update should be skipped (logged).
+	evt := map[string]interface{}{
+		"type": "system_event",
+	}
+	body, _ := json.Marshal(evt)
+
+	handler := sub.handlers["events.#"]
+	if err := handler(body); err != nil {
+		t.Fatalf("handleEvent error: %v", err)
+	}
+
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if len(cache.items) != 0 {
+		t.Errorf("expected no cache updates for event without project_id, got %d", len(cache.items))
+	}
+}

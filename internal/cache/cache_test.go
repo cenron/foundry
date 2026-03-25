@@ -114,3 +114,42 @@ func TestExists(t *testing.T) {
 
 	_ = c.Delete(ctx, key)
 }
+
+func TestIncr(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := context.Background()
+	c, err := cache.Connect(ctx, testRedisURL(t))
+	if err != nil {
+		t.Fatalf("Connect() error: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	key := "test:cache:incr"
+	_ = c.Delete(ctx, key)
+	defer func() { _ = c.Delete(ctx, key) }()
+
+	// First increment creates the key with a TTL.
+	if err := c.Incr(ctx, key, 10*time.Second); err != nil {
+		t.Fatalf("Incr() first: %v", err)
+	}
+
+	exists, _ := c.Exists(ctx, key)
+	if !exists {
+		t.Error("key should exist after first Incr")
+	}
+
+	// Second increment reuses the existing key.
+	if err := c.Incr(ctx, key, 10*time.Second); err != nil {
+		t.Fatalf("Incr() second: %v", err)
+	}
+}
+
+func TestConnect_InvalidURL(t *testing.T) {
+	_, err := cache.Connect(context.Background(), "not-a-url")
+	if err == nil {
+		t.Fatal("expected error for invalid URL, got nil")
+	}
+}

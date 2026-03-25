@@ -312,3 +312,116 @@ func TestManager_GetStatus(t *testing.T) {
 		t.Errorf("Health = %q, want %q", status.Health, "running")
 	}
 }
+
+func TestManager_GetStatus_WithDockerHealthCheck(t *testing.T) {
+	mock := &mockDockerClient{
+		inspectResp: containertypes.InspectResponse{
+			ContainerJSONBase: &containertypes.ContainerJSONBase{
+				ID: "c-123",
+				State: &containertypes.State{
+					Status:    "running",
+					Running:   true,
+					StartedAt: "2026-03-23T20:00:00.000000000Z",
+					Health: &containertypes.Health{
+						Status: "healthy",
+					},
+				},
+			},
+		},
+	}
+	mgr := container.NewManager(mock, "")
+
+	status, err := mgr.GetStatus(context.Background(), "c-123")
+	if err != nil {
+		t.Fatalf("GetStatus() error: %v", err)
+	}
+
+	if status.Health != "healthy" {
+		t.Errorf("Health = %q, want %q (should use docker healthcheck status)", status.Health, "healthy")
+	}
+}
+
+func TestManager_GetStatus_StoppedContainer(t *testing.T) {
+	mock := &mockDockerClient{
+		inspectResp: containertypes.InspectResponse{
+			ContainerJSONBase: &containertypes.ContainerJSONBase{
+				ID: "c-123",
+				State: &containertypes.State{
+					Status:    "exited",
+					Running:   false,
+					StartedAt: "2026-03-23T20:00:00.000000000Z",
+				},
+			},
+		},
+	}
+	mgr := container.NewManager(mock, "")
+
+	status, err := mgr.GetStatus(context.Background(), "c-123")
+	if err != nil {
+		t.Fatalf("GetStatus() error: %v", err)
+	}
+
+	if status.State != "exited" {
+		t.Errorf("State = %q, want %q", status.State, "exited")
+	}
+	if status.Health != "exited" {
+		t.Errorf("Health = %q, want %q (stopped container reports state as health)", status.Health, "exited")
+	}
+}
+
+func TestManager_StreamLogs(t *testing.T) {
+	mock := &mockDockerClient{}
+	mgr := container.NewManager(mock, "")
+
+	reader, err := mgr.StreamLogs(context.Background(), "c-123")
+	if err != nil {
+		t.Fatalf("StreamLogs() error: %v", err)
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("reading logs: %v", err)
+	}
+
+	if string(data) != "log output" {
+		t.Errorf("logs = %q, want %q", string(data), "log output")
+	}
+}
+
+func TestManager_ExecInTeam(t *testing.T) {
+	mock := &mockDockerClient{
+		execOutput:   "hello from exec",
+		execExitCode: 0,
+	}
+	mgr := container.NewManager(mock, "")
+
+	output, err := mgr.ExecInTeam(context.Background(), "c-123", []string{"echo", "hello from exec"})
+	if err != nil {
+		t.Fatalf("ExecInTeam() error: %v", err)
+	}
+
+	if output != "hello from exec" {
+		t.Errorf("output = %q, want %q", output, "hello from exec")
+	}
+
+	if mock.execOpts.AttachStdout != true {
+		t.Error("expected AttachStdout = true")
+	}
+	if mock.execOpts.AttachStderr != true {
+		t.Error("expected AttachStderr = true")
+	}
+}
+
+func TestManager_ExecInTeam_NonZeroExitCode(t *testing.T) {
+	mock := &mockDockerClient{
+		execOutput:   "command failed",
+		execExitCode: 1,
+	}
+	mgr := container.NewManager(mock, "")
+
+	_, err := mgr.ExecInTeam(context.Background(), "c-123", []string{"false"})
+	if err == nil {
+		t.Fatal("expected error for non-zero exit code")
+	}
+}
