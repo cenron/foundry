@@ -11,6 +11,7 @@ import (
 	"github.com/cenron/foundry/internal/broker"
 	"github.com/cenron/foundry/internal/cache"
 	"github.com/cenron/foundry/internal/orchestrator"
+	"github.com/cenron/foundry/internal/po"
 	"github.com/cenron/foundry/internal/project"
 )
 
@@ -24,6 +25,7 @@ type ServerDeps struct {
 	Agents       *agent.Store
 	Library      *agent.Library
 	RiskProfiles *project.RiskProfileStore
+	PO           *po.SessionManager
 }
 
 type Server struct {
