@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"sync"
@@ -234,8 +235,7 @@ func (m *SessionManager) StopAll() {
 
 	for _, name := range projectNames {
 		if err := m.StopSession(name); err != nil {
-			// Log but continue stopping others.
-			_ = err
+			log.Printf("stopping PO session %q: %v", name, err)
 		}
 	}
 }

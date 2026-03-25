@@ -9,6 +9,11 @@ import (
 )
 
 func TestLoad_Defaults(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home dir")
+	}
+
 	cfg := config.Load()
 
 	tests := []struct {
@@ -21,8 +26,8 @@ func TestLoad_Defaults(t *testing.T) {
 		{"RabbitMQURL", cfg.RabbitMQURL, "amqp://guest:guest@localhost:5672/"},
 		{"APIPort", cfg.APIPort, "8080"},
 		{"AgentLibraryPath", cfg.AgentLibraryPath, "./agents"},
-		{"SSHKeyPath", cfg.SSHKeyPath, "~/.ssh"},
-		{"FoundryHome", cfg.FoundryHome, "~/foundry"},
+		{"SSHKeyPath", cfg.SSHKeyPath, filepath.Join(home, ".ssh")},
+		{"FoundryHome", cfg.FoundryHome, filepath.Join(home, "foundry")},
 		{"ClaudeVersion", cfg.ClaudeVersion, "latest"},
 		{"RuntimeMode", cfg.RuntimeMode, "docker"},
 	}
@@ -157,13 +162,17 @@ func TestLoad_EnvOrInt_ValidValue(t *testing.T) {
 	}
 }
 
-func TestLoad_SSHKeyPath_DefaultNotExpanded(t *testing.T) {
-	// When SSH_KEY_PATH env var is not set, the default "~/.ssh" is returned as-is
-	// (expandHome is only called when the env var is non-empty).
+func TestLoad_SSHKeyPath_DefaultExpanded(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home dir")
+	}
+
 	cfg := config.Load()
 
-	if cfg.SSHKeyPath != "~/.ssh" {
-		t.Errorf("SSHKeyPath = %q, want default %q (unexpanded)", cfg.SSHKeyPath, "~/.ssh")
+	want := filepath.Join(home, ".ssh")
+	if cfg.SSHKeyPath != want {
+		t.Errorf("SSHKeyPath = %q, want %q (default expanded)", cfg.SSHKeyPath, want)
 	}
 }
 

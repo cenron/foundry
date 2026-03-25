@@ -22,14 +22,13 @@ interface POChatWindowProps {
 }
 
 interface SentMessage {
-  id: number
+  id: string
   text: string
 }
 
 export function POChatWindow({ projectId }: POChatWindowProps) {
   const [messageText, setMessageText] = useState('')
   const [sentMessages, setSentMessages] = useState<SentMessage[]>([])
-  const [nextId, setNextId] = useState(1)
 
   const { data: poStatus } = useQuery({
     ...getProjectsByIdPoStatusOptions({ path: { id: projectId ?? '' } }),
@@ -52,12 +51,12 @@ export function POChatWindow({ projectId }: POChatWindowProps) {
 
   function handleSend() {
     const text = messageText.trim()
-    if (!text || !projectId) return
+    if (!text || !projectId || sendMutation.isPending) return
 
-    setSentMessages((prev) => [...prev, { id: nextId, text }])
-    setNextId((n) => n + 1)
+    const id = crypto.randomUUID()
+    setSentMessages((prev) => [...prev, { id, text }])
 
-    sendMutation.mutate({ path: { id: projectId }, body: { message: text } as never })
+    sendMutation.mutate({ path: { id: projectId }, body: { message: text } })
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {

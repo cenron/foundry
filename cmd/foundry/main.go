@@ -91,7 +91,8 @@ func main() {
 	if cfg.IsLocalMode() {
 		log.Println("local mode: skipping RabbitMQ, using local runtime")
 		deps.Runtime = runtime.NewLocalRuntime(cfg.MaxConcurrentAgents)
-		deps.PO = po.NewLocalSessionManager(cfg.FoundryHome, cfg.ClaudeVersion)
+		poManager = po.NewLocalSessionManager(cfg.FoundryHome, cfg.ClaudeVersion)
+		deps.PO = poManager
 	} else {
 		brokerClient, err = broker.Connect(ctx, cfg.RabbitMQURL)
 		if err != nil {

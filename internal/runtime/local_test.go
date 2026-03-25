@@ -552,7 +552,7 @@ func assertArgPair(t *testing.T, args []string, flag, value string) {
 
 // findClaude checks whether claude is available on PATH.
 func findClaude() (string, error) {
-	return "", os.ErrNotExist
+	return exec.LookPath("claude")
 }
 
 // stubClaude creates a temp directory with a shell script named "claude" that

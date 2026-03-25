@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -237,6 +238,7 @@ func (s *Server) handleStartProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set up the workspace.
+	projectsBase := filepath.Join(s.deps.FoundryHome, "projects")
 	if err := s.deps.Runtime.Setup(r.Context(), runtime.SetupOpts{
 		ProjectID: projectID.String(),
 		RepoURL:   proj.RepoURL,
@@ -247,12 +249,13 @@ func (s *Server) handleStartProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Launch the agent process.
+	agentWorkDir := filepath.Join(projectsBase, projectID.String(), "workspace")
 	agentProcess, err := s.deps.Runtime.LaunchAgent(r.Context(), runtime.AgentOpts{
 		AgentID:   a.ID.String(),
 		ProjectID: projectID.String(),
 		Role:      a.Role,
 		Prompt:    spec.ApprovedContent,
-		WorkDir:   s.deps.FoundryHome,
+		WorkDir:   agentWorkDir,
 	})
 	if err != nil {
 		RespondError(w, fmt.Errorf("launching agent: %w", err))

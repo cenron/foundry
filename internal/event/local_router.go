@@ -39,6 +39,7 @@ func (lr *LocalRouter) StreamAgentOutput(ctx context.Context, projectID, agentID
 	Read(p []byte) (n int, err error)
 }) {
 	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024) // 1MB max line
 
 	for {
 		select {
@@ -48,11 +49,15 @@ func (lr *LocalRouter) StreamAgentOutput(ctx context.Context, projectID, agentID
 		}
 
 		if !scanner.Scan() {
-			return
+			break
 		}
 
 		line := scanner.Text()
 		lr.ForwardLogLine(ctx, projectID, agentID, line)
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("local router: scanner error for agent %s: %v", agentID, err)
 	}
 }
 

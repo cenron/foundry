@@ -48,7 +48,7 @@ func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return expandHome(v)
 	}
-	return fallback
+	return expandHome(fallback)
 }
 
 func envOrInt(key string, fallback int) int {
