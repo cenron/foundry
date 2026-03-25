@@ -80,7 +80,7 @@ func (s *Server) handleUpdateSpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	spec, err := s.deps.Specs.Create(r.Context(), project.CreateSpecParams{
+	spec, err := s.deps.Specs.UpdateContent(r.Context(), projectID, project.CreateSpecParams{
 		ProjectID:        projectID,
 		ApprovedContent:  req.ApprovedContent,
 		ExecutionContent: req.ExecutionContent,

@@ -21,7 +21,7 @@ export function useProjectEvents(projectId: string): void {
 
       if (!event?.type || event.project_id !== projectId) return
 
-      if (event.type === 'task.status_changed') {
+      if (event.type === 'task.transition') {
         queryClient.invalidateQueries({
           queryKey: getProjectsByIdTasksQueryKey({ path: { id: projectId } }),
         })

@@ -78,18 +78,24 @@ func (s *Store) Update(ctx context.Context, id shared.ID, name, description stri
 		name, description, id,
 	).StructScan(&p)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &shared.NotFoundError{Resource: "project", ID: id.String()}
+		}
 		return nil, fmt.Errorf("updating project %s: %w", id, err)
 	}
 	return &p, nil
 }
 
 func (s *Store) UpdateStatus(ctx context.Context, id shared.ID, status string) error {
-	_, err := s.db.ExecContext(ctx,
+	result, err := s.db.ExecContext(ctx,
 		"UPDATE projects SET status = $1, updated_at = now() WHERE id = $2",
 		status, id,
 	)
 	if err != nil {
 		return fmt.Errorf("updating project status: %w", err)
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		return &shared.NotFoundError{Resource: "project", ID: id.String()}
 	}
 	return nil
 }
@@ -128,6 +134,39 @@ func (s *SpecStore) GetByProjectID(ctx context.Context, projectID shared.ID) (*S
 			return nil, &shared.NotFoundError{Resource: "spec", ID: projectID.String()}
 		}
 		return nil, fmt.Errorf("getting spec for project %s: %w", projectID, err)
+	}
+	return &spec, nil
+}
+
+func (s *SpecStore) UpdateContent(ctx context.Context, projectID shared.ID, params CreateSpecParams) (*Spec, error) {
+	existing, err := s.GetByProjectID(ctx, projectID)
+	if err != nil {
+		var notFound *shared.NotFoundError
+		if !errors.As(err, &notFound) {
+			return nil, err
+		}
+		// No existing spec — create one.
+		return s.Create(ctx, params)
+	}
+
+	var spec Spec
+	err = s.db.QueryRowxContext(ctx, `
+		UPDATE specs
+		SET    approved_content  = $1,
+		       execution_content = $2,
+		       token_estimate    = $3,
+		       agent_count       = $4,
+		       updated_at        = now()
+		WHERE  id = $5
+		RETURNING *`,
+		params.ApprovedContent,
+		params.ExecutionContent,
+		params.TokenEstimate,
+		params.AgentCount,
+		existing.ID,
+	).StructScan(&spec)
+	if err != nil {
+		return nil, fmt.Errorf("updating spec for project %s: %w", projectID, err)
 	}
 	return &spec, nil
 }

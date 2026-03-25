@@ -67,7 +67,7 @@ func (c *Client) Publish(ctx context.Context, exchange, routingKey string, body 
 
 type MessageHandler func(body []byte) error
 
-func (c *Client) Subscribe(exchange, routingKey, queueName string, handler MessageHandler) error {
+func (c *Client) Subscribe(exchange, routingKey, queueName string, handler func(body []byte) error) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

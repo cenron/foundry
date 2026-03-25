@@ -9,8 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/cenron/foundry/internal/shared"
 )
 
@@ -147,7 +145,7 @@ func (m *SessionManager) StartSession(ctx context.Context, opts POSessionOpts) (
 	}
 
 	session := &POSession{
-		ID:          uuid.New().String(),
+		ID:          shared.NewID().String(),
 		ProjectName: opts.Project,
 		Type:        opts.Type,
 		PID:         cmd.Process.Pid,

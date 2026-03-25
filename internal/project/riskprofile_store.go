@@ -114,6 +114,9 @@ func (s *RiskProfileStore) Update(ctx context.Context, id shared.ID, params Upda
 		id,
 	).StructScan(&profile)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &shared.NotFoundError{Resource: "risk_profile", ID: id.String()}
+		}
 		return nil, fmt.Errorf("updating risk profile %s: %w", id, err)
 	}
 
