@@ -112,6 +112,10 @@ func (m *mockTaskCreator) Create(_ context.Context, params orchestrator.CreateTa
 	return task, nil
 }
 
+func (m *mockTaskCreator) UpdateDependsOn(_ context.Context, _ shared.ID, _ []shared.ID) error {
+	return nil
+}
+
 func setupStarter(t *testing.T) (
 	*orchestrator.ProjectStarter,
 	*mockProjectReader,

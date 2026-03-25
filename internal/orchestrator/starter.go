@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"log"
+	"path/filepath"
 
 	"github.com/cenron/foundry/internal/agent"
 	"github.com/cenron/foundry/internal/container"
@@ -30,6 +32,7 @@ type ContainerCreator interface {
 // TaskCreator persists new task records.
 type TaskCreator interface {
 	Create(ctx context.Context, params CreateTaskParams) (*Task, error)
+	UpdateDependsOn(ctx context.Context, id shared.ID, dependsOn []shared.ID) error
 }
 
 // UnblockedTasksReader finds tasks that are ready to execute.
@@ -114,7 +117,7 @@ func (s *ProjectStarter) StartProject(ctx context.Context, params StartProjectPa
 		}
 	}
 
-	containerID, err := s.provisionContainer(ctx, params)
+	containerID, err := s.provisionContainer(ctx, params, proj)
 	if err != nil {
 		return err
 	}
@@ -124,12 +127,11 @@ func (s *ProjectStarter) StartProject(ctx context.Context, params StartProjectPa
 		return err
 	}
 
-	taskIndex, err := s.createTasks(ctx, params)
-	if err != nil {
+	if _, err := s.createTasks(ctx, params); err != nil {
 		return err
 	}
 
-	if err := s.assignInitialTasks(ctx, params.ProjectID, taskIndex, createdAgents); err != nil {
+	if err := s.assignInitialTasks(ctx, params.ProjectID, createdAgents); err != nil {
 		return err
 	}
 
@@ -140,10 +142,10 @@ func (s *ProjectStarter) StartProject(ctx context.Context, params StartProjectPa
 	return nil
 }
 
-func (s *ProjectStarter) provisionContainer(ctx context.Context, params StartProjectParams) (string, error) {
+func (s *ProjectStarter) provisionContainer(ctx context.Context, params StartProjectParams, proj *project.Project) (string, error) {
 	cfg := container.TeamContainerConfig{
 		ProjectID:       params.ProjectID.String(),
-		SharedVolPath:   params.FoundryHome + "/projects/" + params.ProjectID.String() + "/shared",
+		SharedVolPath:   filepath.Join(params.FoundryHome, "projects", proj.Name, "shared"),
 		TeamComposition: params.Config.Roles,
 	}
 
@@ -182,10 +184,12 @@ func (s *ProjectStarter) createAgents(ctx context.Context, params StartProjectPa
 	return agents, nil
 }
 
-// createTasks seeds all task records and returns a map from task title to Task
-// so dependency resolution can reference tasks by name.
+// createTasks seeds all task records and returns a map from task title to Task.
+//
+// Two-pass approach: first create all tasks without dependencies (to obtain
+// their IDs), then resolve each task's DependsOn titles to IDs and persist them.
 func (s *ProjectStarter) createTasks(ctx context.Context, params StartProjectParams) (map[string]*Task, error) {
-	// First pass: create all tasks without dependencies to get their IDs.
+	// First pass: create all tasks without dependencies.
 	titleToTask := make(map[string]*Task, len(params.Config.Tasks))
 	for _, def := range params.Config.Tasks {
 		task, err := s.tasks.Create(ctx, CreateTaskParams{
@@ -202,13 +206,33 @@ func (s *ProjectStarter) createTasks(ctx context.Context, params StartProjectPar
 		titleToTask[def.Title] = task
 	}
 
+	// Second pass: resolve dependency titles to IDs and persist them.
+	for _, def := range params.Config.Tasks {
+		if len(def.DependsOn) == 0 {
+			continue
+		}
+
+		depIDs := make([]shared.ID, 0, len(def.DependsOn))
+		for _, depTitle := range def.DependsOn {
+			dep, ok := titleToTask[depTitle]
+			if !ok {
+				return nil, fmt.Errorf("task %q depends on unknown task %q", def.Title, depTitle)
+			}
+			depIDs = append(depIDs, dep.ID)
+		}
+
+		task := titleToTask[def.Title]
+		if err := s.tasks.UpdateDependsOn(ctx, task.ID, depIDs); err != nil {
+			return nil, fmt.Errorf("setting dependencies for task %q: %w", def.Title, err)
+		}
+	}
+
 	return titleToTask, nil
 }
 
 func (s *ProjectStarter) assignInitialTasks(
 	ctx context.Context,
 	projectID shared.ID,
-	taskIndex map[string]*Task,
 	agents []agent.Agent,
 ) error {
 	unblocked, err := s.unblocked.GetUnblockedTasks(ctx, projectID)
@@ -231,6 +255,7 @@ func (s *ProjectStarter) assignInitialTasks(
 		available := AvailableAgent{ID: a.ID, Role: a.Role}
 		if err := s.assignTask(ctx, task, available); err != nil {
 			// Non-fatal: log and continue so other tasks still get assigned.
+			log.Printf("assigning task %q to agent %q failed: %v", task.Title, a.Role, err)
 			continue
 		}
 	}

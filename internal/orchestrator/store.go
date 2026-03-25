@@ -76,6 +76,22 @@ func (s *TaskStore) UpdateStatus(ctx context.Context, id shared.ID, status strin
 	return nil
 }
 
+func (s *TaskStore) UpdateDependsOn(ctx context.Context, id shared.ID, dependsOn []shared.ID) error {
+	depStrings := make([]string, len(dependsOn))
+	for i, d := range dependsOn {
+		depStrings[i] = d.String()
+	}
+
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE tasks SET depends_on = $1, updated_at = now() WHERE id = $2",
+		pq.Array(depStrings), id,
+	)
+	if err != nil {
+		return fmt.Errorf("updating task dependencies: %w", err)
+	}
+	return nil
+}
+
 func (s *TaskStore) UpdateAssignment(ctx context.Context, id shared.ID, agentID shared.ID) error {
 	_, err := s.db.ExecContext(ctx,
 		"UPDATE tasks SET assigned_agent_id = $1, status = 'assigned', updated_at = now() WHERE id = $2",

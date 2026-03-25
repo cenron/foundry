@@ -10,6 +10,38 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// waitForClients polls hub.clients until at least n clients are registered,
+// or the deadline passes.
+func waitForClients(h *Hub, n int, deadline time.Duration) bool {
+	end := time.Now().Add(deadline)
+	for time.Now().Before(end) {
+		h.mu.RLock()
+		count := len(h.clients)
+		h.mu.RUnlock()
+		if count >= n {
+			return true
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return false
+}
+
+// waitForChannelSubscribers polls channelHub.subscribers until at least n
+// connections are registered under the given topic, or the deadline passes.
+func waitForChannelSubscribers(ch *ChannelHub, topic string, n int, deadline time.Duration) bool {
+	end := time.Now().Add(deadline)
+	for time.Now().Before(end) {
+		ch.mu.RLock()
+		count := len(ch.subscribers[topic])
+		ch.mu.RUnlock()
+		if count >= n {
+			return true
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return false
+}
+
 // dialTestServer dials the given httptest.Server URL as a WebSocket.
 func dialTestServer(t *testing.T, ts *httptest.Server, path string) *websocket.Conn {
 	t.Helper()
@@ -51,8 +83,10 @@ func TestHub_RegisterBroadcastUnregister(t *testing.T) {
 	conn := dialTestServer(t, ts, "/")
 	defer func() { _ = conn.Close() }()
 
-	// Give the handler goroutine time to Register.
-	time.Sleep(10 * time.Millisecond)
+	// Wait for the handler goroutine to call Register before broadcasting.
+	if !waitForClients(hub, 1, 2*time.Second) {
+		t.Fatal("timed out waiting for hub to register client")
+	}
 
 	// Broadcast — the registered client should receive the message.
 	hub.Broadcast([]byte("hello"))
@@ -100,8 +134,10 @@ func TestChannelHub_SubscribePublish(t *testing.T) {
 	conn := dialTestServer(t, ts, "/")
 	defer func() { _ = conn.Close() }()
 
-	// Give the handler time to Subscribe.
-	time.Sleep(10 * time.Millisecond)
+	// Wait for the handler goroutine to call Subscribe before publishing.
+	if !waitForChannelSubscribers(hub, "proj:1", 1, 2*time.Second) {
+		t.Fatal("timed out waiting for channelhub to register subscriber")
+	}
 
 	hub.Publish("proj:1", []byte("event-data"))
 

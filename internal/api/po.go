@@ -18,6 +18,22 @@ func (s *Server) registerPORoutes(r chi.Router) {
 	r.Post("/projects/{id}/po/estimation", s.handlePOEstimation)
 }
 
+// resolveProjectName returns the project name for the given UUID.
+// Falls back to the raw UUID string when the project store is unavailable
+// or the project is not found (e.g., in test environments with only PO configured).
+func (s *Server) resolveProjectName(r *http.Request, id shared.ID) (string, error) {
+	if s.deps.Projects == nil {
+		return id.String(), nil
+	}
+
+	proj, err := s.deps.Projects.GetByID(r.Context(), id)
+	if err != nil {
+		return "", err
+	}
+
+	return proj.Name, nil
+}
+
 // handlePOChat sends a message to the PO and starts/continues a chat session.
 //
 // @Summary      PO chat
@@ -31,7 +47,8 @@ func (s *Server) registerPORoutes(r chi.Router) {
 // @Failure      501 {object} ErrorResponse "Not implemented"
 // @Router       /projects/{id}/po/chat [post]
 func (s *Server) handlePOChat(w http.ResponseWriter, r *http.Request) {
-	if _, err := shared.ParseID(chi.URLParam(r, "id")); err != nil {
+	parsedID, err := shared.ParseID(chi.URLParam(r, "id"))
+	if err != nil {
 		RespondError(w, &shared.ValidationError{Field: "id", Message: "invalid UUID"})
 		return
 	}
@@ -51,8 +68,13 @@ func (s *Server) handlePOChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectName := chi.URLParam(r, "id") // In production, resolve project name from ID
-	_, err := s.deps.PO.StartSession(r.Context(), po.POSessionOpts{
+	projectName, err := s.resolveProjectName(r, parsedID)
+	if err != nil {
+		RespondError(w, err)
+		return
+	}
+
+	_, err = s.deps.PO.StartSession(r.Context(), po.POSessionOpts{
 		Type:    "execution-chat",
 		Project: projectName,
 		Trigger: "user",
@@ -77,7 +99,8 @@ func (s *Server) handlePOChat(w http.ResponseWriter, r *http.Request) {
 // @Failure      400 {object} ErrorResponse "Invalid ID"
 // @Router       /projects/{id}/po/chat [delete]
 func (s *Server) handlePOChatDelete(w http.ResponseWriter, r *http.Request) {
-	if _, err := shared.ParseID(chi.URLParam(r, "id")); err != nil {
+	parsedID, err := shared.ParseID(chi.URLParam(r, "id"))
+	if err != nil {
 		RespondError(w, &shared.ValidationError{Field: "id", Message: "invalid UUID"})
 		return
 	}
@@ -89,7 +112,12 @@ func (s *Server) handlePOChatDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectName := chi.URLParam(r, "id")
+	projectName, err := s.resolveProjectName(r, parsedID)
+	if err != nil {
+		RespondError(w, err)
+		return
+	}
+
 	if err := s.deps.PO.StopSession(projectName); err != nil {
 		RespondError(w, err)
 		return
@@ -109,7 +137,8 @@ func (s *Server) handlePOChatDelete(w http.ResponseWriter, r *http.Request) {
 // @Failure      400 {object} ErrorResponse "Invalid ID"
 // @Router       /projects/{id}/po/status [get]
 func (s *Server) handlePOStatus(w http.ResponseWriter, r *http.Request) {
-	if _, err := shared.ParseID(chi.URLParam(r, "id")); err != nil {
+	parsedID, err := shared.ParseID(chi.URLParam(r, "id"))
+	if err != nil {
 		RespondError(w, &shared.ValidationError{Field: "id", Message: "invalid UUID"})
 		return
 	}
@@ -122,7 +151,12 @@ func (s *Server) handlePOStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectName := chi.URLParam(r, "id")
+	projectName, err := s.resolveProjectName(r, parsedID)
+	if err != nil {
+		RespondError(w, err)
+		return
+	}
+
 	active := s.deps.PO.IsActive(projectName)
 
 	RespondJSON(w, http.StatusOK, map[string]interface{}{
@@ -142,7 +176,8 @@ func (s *Server) handlePOStatus(w http.ResponseWriter, r *http.Request) {
 // @Failure      501 {object} ErrorResponse "Not implemented"
 // @Router       /projects/{id}/po/planning [post]
 func (s *Server) handlePOPlanning(w http.ResponseWriter, r *http.Request) {
-	if _, err := shared.ParseID(chi.URLParam(r, "id")); err != nil {
+	parsedID, err := shared.ParseID(chi.URLParam(r, "id"))
+	if err != nil {
 		RespondError(w, &shared.ValidationError{Field: "id", Message: "invalid UUID"})
 		return
 	}
@@ -154,8 +189,13 @@ func (s *Server) handlePOPlanning(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectName := chi.URLParam(r, "id")
-	_, err := s.deps.PO.StartSession(r.Context(), po.POSessionOpts{
+	projectName, err := s.resolveProjectName(r, parsedID)
+	if err != nil {
+		RespondError(w, err)
+		return
+	}
+
+	_, err = s.deps.PO.StartSession(r.Context(), po.POSessionOpts{
 		Type:    "planning",
 		Project: projectName,
 		Trigger: "user",
@@ -181,7 +221,8 @@ func (s *Server) handlePOPlanning(w http.ResponseWriter, r *http.Request) {
 // @Failure      501 {object} ErrorResponse "Not implemented"
 // @Router       /projects/{id}/po/estimation [post]
 func (s *Server) handlePOEstimation(w http.ResponseWriter, r *http.Request) {
-	if _, err := shared.ParseID(chi.URLParam(r, "id")); err != nil {
+	parsedID, err := shared.ParseID(chi.URLParam(r, "id"))
+	if err != nil {
 		RespondError(w, &shared.ValidationError{Field: "id", Message: "invalid UUID"})
 		return
 	}
@@ -193,8 +234,13 @@ func (s *Server) handlePOEstimation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectName := chi.URLParam(r, "id")
-	_, err := s.deps.PO.StartSession(r.Context(), po.POSessionOpts{
+	projectName, err := s.resolveProjectName(r, parsedID)
+	if err != nil {
+		RespondError(w, err)
+		return
+	}
+
+	_, err = s.deps.PO.StartSession(r.Context(), po.POSessionOpts{
 		Type:    "estimation",
 		Project: projectName,
 		Trigger: "system",

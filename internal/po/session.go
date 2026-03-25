@@ -4,10 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/cenron/foundry/internal/shared"
 )
 
 // SessionType constants for PO session types.
@@ -120,6 +124,13 @@ func NewSessionManager(foundryHome, apiKey, claudeVersion string) *SessionManage
 
 // StartSession launches a PO Claude Code session for the given project.
 func (m *SessionManager) StartSession(ctx context.Context, opts POSessionOpts) (*POSession, error) {
+	if _, ok := sessionTiers[opts.Type]; !ok {
+		return nil, &shared.ValidationError{
+			Field:   "type",
+			Message: fmt.Sprintf("unknown session type %q", opts.Type),
+		}
+	}
+
 	sessionCtx, cancel := context.WithCancel(ctx)
 
 	cmd := m.BuildCommand(sessionCtx, opts)
@@ -154,6 +165,10 @@ func (m *SessionManager) StartSession(ctx context.Context, opts POSessionOpts) (
 }
 
 // StopSession gracefully stops the active PO session for a project.
+//
+// It sends SIGTERM, waits up to 5 seconds for the process to exit, then
+// SIGKILLs if still running. The stdout pipe is closed and cmd.Wait is
+// called to reap the child process and avoid zombies.
 func (m *SessionManager) StopSession(projectName string) error {
 	m.mu.Lock()
 	session, ok := m.sessions[projectName]
@@ -166,12 +181,33 @@ func (m *SessionManager) StopSession(projectName string) error {
 
 	session.Status = SessionStatusStopped
 
+	// Cancel the context, which sends SIGTERM via exec.CommandContext.
 	if session.cancel != nil {
 		session.cancel()
 	}
 
 	if session.cmd != nil && session.cmd.Process != nil {
-		_ = session.cmd.Process.Kill()
+		// Send SIGTERM and give the process time to exit cleanly.
+		_ = session.cmd.Process.Signal(os.Interrupt)
+
+		done := make(chan struct{})
+		go func() {
+			_ = session.cmd.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			// Process exited cleanly.
+		case <-time.After(5 * time.Second):
+			// Timeout — force kill.
+			_ = session.cmd.Process.Kill()
+			<-done
+		}
+	}
+
+	if session.stdout != nil {
+		_ = session.stdout.Close()
 	}
 
 	return nil
